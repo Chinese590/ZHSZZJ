@@ -79,7 +79,8 @@ public sealed class StartupCoordinatorTests
             installer,
             health,
             launcher,
-            NullStartupProgress.Instance);
+            NullStartupProgress.Instance,
+            new FakeUpdatePrompt());
 
         var result = await coordinator.RunAsync(CancellationToken.None);
         var active = await stateStore.LoadAsync();
@@ -119,20 +120,89 @@ public sealed class StartupCoordinatorTests
         Assert.Equal(1, launcher.StartCount);
     }
 
-    private static ReleaseManifest ManifestFor(string version) => ReleaseManifest.Parse(
+    [Fact]
+    public async Task Declining_available_update_starts_current_version_without_downloading()
+    {
+        using var temp = new TempDirectory();
+        var configStore = new LauncherConfigStore(temp.Combine("localapp"));
+        var cacheRoot = temp.Combine("cache");
+        await configStore.SaveAsync(new LauncherConfig(1, cacheRoot, "stable"));
+        var stateStore = new InstallStateStore(CacheLayout.FromRoot(cacheRoot).State);
+        await stateStore.SaveAsync(new InstallState(1, "1.0.8", "1.0.8", "app/main.py"));
+        var prompt = new FakeUpdatePrompt { Result = false };
+        var download = new FakeDownloadService();
+        var launcher = new FakeApplicationLauncher();
+        var coordinator = new StartupCoordinator(
+            configStore,
+            new CacheRootSelector(new FakeFolderPicker(), new FakeCacheRootValidator()),
+            new FakeManifestClient { Manifest = ManifestFor("1.0.9") },
+            download,
+            new FakePackageInstaller(),
+            new FakeHealthChecker { Report = HealthReport.Healthy() },
+            launcher,
+            NullStartupProgress.Instance,
+            prompt);
+
+        var result = await coordinator.RunAsync(CancellationToken.None);
+        var active = await stateStore.LoadAsync();
+
+        Assert.Equal(StartupOutcome.Started, result.Outcome);
+        Assert.Equal(1, prompt.PromptCount);
+        Assert.Equal(0, download.DownloadCount);
+        Assert.Equal("1.0.8", active!.AppVersion);
+        Assert.Equal(1, launcher.StartCount);
+    }
+
+    [Fact]
+    public async Task App_only_update_does_not_redownload_runtime()
+    {
+        using var temp = new TempDirectory();
+        var configStore = new LauncherConfigStore(temp.Combine("localapp"));
+        var cacheRoot = temp.Combine("cache");
+        await configStore.SaveAsync(new LauncherConfig(1, cacheRoot, "stable"));
+        var stateStore = new InstallStateStore(CacheLayout.FromRoot(cacheRoot).State);
+        await stateStore.SaveAsync(new InstallState(1, "1.0.8", "1.0.8", "app/main.py"));
+        var download = new FakeDownloadService();
+        var installer = new FakePackageInstaller();
+        var prompt = new FakeUpdatePrompt();
+        var coordinator = new StartupCoordinator(
+            configStore,
+            new CacheRootSelector(new FakeFolderPicker(), new FakeCacheRootValidator()),
+            new FakeManifestClient { Manifest = ManifestFor("1.0.8", "1.0.9") },
+            download,
+            installer,
+            new FakeHealthChecker { Report = HealthReport.Healthy() },
+            new FakeApplicationLauncher(),
+            NullStartupProgress.Instance,
+            prompt);
+
+        var result = await coordinator.RunAsync(CancellationToken.None);
+        var active = await stateStore.LoadAsync();
+
+        Assert.Equal(StartupOutcome.Started, result.Outcome);
+        Assert.Equal(1, prompt.PromptCount);
+        Assert.Equal(1, download.DownloadCount);
+        Assert.Equal(1, installer.InstallCount);
+        Assert.Equal("1.0.8", active!.RuntimeVersion);
+        Assert.Equal("1.0.9", active.AppVersion);
+    }
+
+    private static ReleaseManifest ManifestFor(string version) => ManifestFor(version, version);
+
+    private static ReleaseManifest ManifestFor(string runtimeVersion, string appVersion) => ReleaseManifest.Parse(
         $$"""
         {
           "schema_version": 1,
           "channel": "stable",
           "runtime": {
-            "version": "{{version}}",
-            "url": "https://github.com/example/repo/releases/download/v{{version}}/runtime.zip",
+            "version": "{{runtimeVersion}}",
+            "url": "https://github.com/example/repo/releases/download/v{{runtimeVersion}}/runtime.zip",
             "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             "size": 1
           },
           "app": {
-            "version": "{{version}}",
-            "url": "https://github.com/example/repo/releases/download/v{{version}}/app.zip",
+            "version": "{{appVersion}}",
+            "url": "https://github.com/example/repo/releases/download/v{{appVersion}}/app.zip",
             "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
             "size": 1,
             "entrypoint": "app/main.py"

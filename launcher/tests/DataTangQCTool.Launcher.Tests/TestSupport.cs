@@ -111,6 +111,21 @@ internal sealed class FakeProcessRunner : IProcessRunner
     }
 }
 
+
+internal sealed class FakeUpdatePrompt : IUpdatePrompt
+{
+    public bool Result { get; set; } = true;
+    public int PromptCount { get; private set; }
+    public UpdateInfo? LastUpdate { get; private set; }
+
+    public Task<bool> ConfirmUpdateAsync(UpdateInfo update, CancellationToken cancellationToken)
+    {
+        PromptCount++;
+        LastUpdate = update;
+        return Task.FromResult(Result);
+    }
+}
+
 internal sealed class FakeApplicationLauncher : IApplicationLauncher
 {
     public int StartCount { get; private set; }

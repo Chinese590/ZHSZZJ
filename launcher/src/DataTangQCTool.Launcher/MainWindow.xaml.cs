@@ -5,7 +5,7 @@ using DataTangQCTool.Launcher.Services;
 
 namespace DataTangQCTool.Launcher;
 
-public partial class MainWindow : Window, IStartupProgress
+public partial class MainWindow : Window, IStartupProgress, IUpdatePrompt
 {
     private readonly LauncherLogger _logger;
     private readonly CancellationTokenSource _lifetimeCts = new();
@@ -48,6 +48,32 @@ public partial class MainWindow : Window, IStartupProgress
             DetailText.Text = progress.Percent is double p ? $"{p:F1}%{speed}" : progress.Stage.ToString();
             AppendLog(progress.Message + speed);
         });
+    }
+
+    public Task<bool> ConfirmUpdateAsync(UpdateInfo update, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return Dispatcher.InvokeAsync(() =>
+        {
+            var changes = new List<string>();
+            if (update.AppWillUpdate)
+            {
+                changes.Add($"主程序：{update.CurrentAppVersion} → {update.NewAppVersion}");
+            }
+            if (update.RuntimeWillUpdate)
+            {
+                changes.Add($"运行库：{update.CurrentRuntimeVersion} → {update.NewRuntimeVersion}");
+            }
+
+            var detail = string.Join(Environment.NewLine, changes);
+            var result = MessageBox.Show(
+                $"发现新版本：\n\n{detail}\n\n是否立即更新？更新完成后会自动启动，无需手动重新下载程序。",
+                "发现数据堂质检工具更新",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Information,
+                MessageBoxResult.Yes);
+            return result == MessageBoxResult.Yes;
+        }).Task;
     }
 
     private async Task StartAsync()

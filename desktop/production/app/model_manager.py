@@ -278,7 +278,22 @@ class ModelManager:
         except ImportError as exc:
             raise ModelDownloadError("运行库缺少 tqdm，无法显示模型下载进度。") from exc
 
+        class _SilentProgressStream:
+            def write(self, value) -> int:  # noqa: ANN001
+                return len(str(value))
+
+            def flush(self) -> None:
+                return
+
+            def isatty(self) -> bool:
+                return False
+
         class CallbackTqdm(tqdm):
+            def __init__(self, *args, **kwargs):  # noqa: ANN002, ANN003
+                if kwargs.get("file") is None:
+                    kwargs["file"] = _SilentProgressStream()
+                super().__init__(*args, **kwargs)
+
             def display(self, msg=None, pos=None) -> None:  # noqa: ANN001
                 return
 

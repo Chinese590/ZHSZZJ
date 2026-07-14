@@ -12,6 +12,7 @@ public sealed class StartupCoordinator
     private readonly IRuntimeHealthChecker _healthChecker;
     private readonly IApplicationLauncher _applicationLauncher;
     private readonly IStartupProgress _progress;
+    private readonly IUpdatePrompt _updatePrompt;
 
     public StartupCoordinator(
         LauncherConfigStore configStore,
@@ -21,7 +22,8 @@ public sealed class StartupCoordinator
         IPackageInstaller packageInstaller,
         IRuntimeHealthChecker healthChecker,
         IApplicationLauncher applicationLauncher,
-        IStartupProgress progress)
+        IStartupProgress progress,
+        IUpdatePrompt? updatePrompt = null)
     {
         _configStore = configStore;
         _cacheRootSelector = cacheRootSelector;
@@ -31,6 +33,7 @@ public sealed class StartupCoordinator
         _healthChecker = healthChecker;
         _applicationLauncher = applicationLauncher;
         _progress = progress;
+        _updatePrompt = updatePrompt ?? AlwaysAcceptUpdatePrompt.Instance;
     }
 
     public async Task<StartupResult> RunAsync(CancellationToken cancellationToken)
@@ -97,7 +100,12 @@ public sealed class StartupCoordinator
                     manifestFailure);
             }
 
-            if (localIsHealthy && !IsUpdateRequired(state!, manifest))
+            var runtimeNeedsUpdate = !localIsHealthy || state is null
+                || IsRemoteNewer(state.RuntimeVersion, manifest.Runtime.Version);
+            var appNeedsUpdate = !localIsHealthy || state is null
+                || IsRemoteNewer(state.AppVersion, manifest.App.Version);
+
+            if (localIsHealthy && !runtimeNeedsUpdate && !appNeedsUpdate)
             {
                 _progress.Report(new StartupProgress(StartupStage.Starting, "当前已是最新版本，正在启动……"));
                 await _applicationLauncher.StartAsync(layout, state!, cancellationToken);
@@ -107,34 +115,67 @@ public sealed class StartupCoordinator
 
             if (localIsHealthy)
             {
-                _progress.Report(new StartupProgress(
-                    StartupStage.DownloadingRuntime,
-                    $"发现新版本：运行库 {manifest.Runtime.Version}，主程序 {manifest.App.Version}。"));
+                var shouldUpdate = await _updatePrompt.ConfirmUpdateAsync(
+                    new UpdateInfo(
+                        state!.RuntimeVersion,
+                        state.AppVersion,
+                        manifest.Runtime.Version,
+                        manifest.App.Version,
+                        runtimeNeedsUpdate,
+                        appNeedsUpdate),
+                    cancellationToken);
+                if (!shouldUpdate)
+                {
+                    _progress.Report(new StartupProgress(StartupStage.Starting, "已暂缓更新，正在启动当前版本……"));
+                    await _applicationLauncher.StartAsync(layout, state, cancellationToken);
+                    _progress.Report(new StartupProgress(StartupStage.Completed, "当前版本已启动。", 100));
+                    return StartupResult.Started(cacheRoot);
+                }
             }
-            var runtimeZip = Path.Combine(layout.Downloads, $"runtime-{manifest.Runtime.Version}.zip");
-            var appZip = Path.Combine(layout.Downloads, $"app-{manifest.App.Version}.zip");
 
-            var runtimeProgress = new Progress<DownloadProgress>(p =>
-                _progress.Report(new StartupProgress(StartupStage.DownloadingRuntime, "下载运行库……", p.Percent, p.BytesPerSecond)));
-            await _downloadService.DownloadAsync(
-                new DownloadRequest(manifest.Runtime.Uri, runtimeZip, manifest.Runtime.Sha256, manifest.Runtime.Size),
-                runtimeProgress,
-                cancellationToken);
+            string? runtimeZip = null;
+            string? appZip = null;
+            if (runtimeNeedsUpdate)
+            {
+                runtimeZip = Path.Combine(layout.Downloads, $"runtime-{manifest.Runtime.Version}.zip");
+                var runtimeProgress = new Progress<DownloadProgress>(p =>
+                    _progress.Report(new StartupProgress(StartupStage.DownloadingRuntime, "下载运行库……", p.Percent, p.BytesPerSecond)));
+                await _downloadService.DownloadAsync(
+                    new DownloadRequest(manifest.Runtime.Uri, runtimeZip, manifest.Runtime.Sha256, manifest.Runtime.Size),
+                    runtimeProgress,
+                    cancellationToken);
+            }
 
-            var appProgress = new Progress<DownloadProgress>(p =>
-                _progress.Report(new StartupProgress(StartupStage.DownloadingApp, "下载主程序……", p.Percent, p.BytesPerSecond)));
-            await _downloadService.DownloadAsync(
-                new DownloadRequest(manifest.App.Uri, appZip, manifest.App.Sha256, manifest.App.Size),
-                appProgress,
-                cancellationToken);
+            if (appNeedsUpdate)
+            {
+                appZip = Path.Combine(layout.Downloads, $"app-{manifest.App.Version}.zip");
+                var appProgress = new Progress<DownloadProgress>(p =>
+                    _progress.Report(new StartupProgress(StartupStage.DownloadingApp, "下载主程序……", p.Percent, p.BytesPerSecond)));
+                await _downloadService.DownloadAsync(
+                    new DownloadRequest(manifest.App.Uri, appZip, manifest.App.Sha256, manifest.App.Size),
+                    appProgress,
+                    cancellationToken);
+            }
 
-            _progress.Report(new StartupProgress(StartupStage.Installing, "安装运行库和主程序……"));
-            var runtimeTarget = Path.Combine(layout.Runtime, manifest.Runtime.Version);
-            var appTarget = Path.Combine(layout.App, manifest.App.Version);
-            await _packageInstaller.InstallPackageAsync(runtimeZip, runtimeTarget, new[] { "python.exe", "pythonw.exe" }, cancellationToken);
-            await _packageInstaller.InstallPackageAsync(appZip, appTarget, new[] { manifest.App.Entrypoint! }, cancellationToken);
+            _progress.Report(new StartupProgress(StartupStage.Installing, "安装更新……"));
+            if (runtimeNeedsUpdate)
+            {
+                var runtimeTarget = Path.Combine(layout.Runtime, manifest.Runtime.Version);
+                await _packageInstaller.InstallPackageAsync(
+                    runtimeZip!, runtimeTarget, new[] { "python.exe", "pythonw.exe" }, cancellationToken);
+            }
+            if (appNeedsUpdate)
+            {
+                var appTarget = Path.Combine(layout.App, manifest.App.Version);
+                await _packageInstaller.InstallPackageAsync(
+                    appZip!, appTarget, new[] { manifest.App.Entrypoint! }, cancellationToken);
+            }
 
-            var nextState = new InstallState(1, manifest.Runtime.Version, manifest.App.Version, manifest.App.Entrypoint!);
+            var nextState = new InstallState(
+                1,
+                runtimeNeedsUpdate ? manifest.Runtime.Version : state!.RuntimeVersion,
+                appNeedsUpdate ? manifest.App.Version : state!.AppVersion,
+                appNeedsUpdate ? manifest.App.Entrypoint! : state!.AppEntrypoint);
 
             _progress.Report(new StartupProgress(StartupStage.Verifying, "验证新安装环境……"));
             health = await _healthChecker.CheckAsync(layout, nextState, cancellationToken);

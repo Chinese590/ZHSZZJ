@@ -53,3 +53,28 @@ def test_delete_removes_only_selected_model_directory(tmp_path: Path):
 
     assert not first.exists()
     assert second.exists()
+
+
+def test_progress_tqdm_works_when_pythonw_has_no_stderr(monkeypatch):
+    import sys
+    import time
+
+    events = []
+    monkeypatch.setattr(sys, "stderr", None)
+    progress_class = ModelManager._make_tqdm_class(
+        callback=events.append,
+        current_file="config.json",
+        base_downloaded=0,
+        file_size=10,
+        total_bytes=10,
+        files_done=0,
+        files_total=1,
+        started_at=time.monotonic(),
+    )
+
+    with progress_class(total=10) as progress:
+        progress.update(5)
+
+    assert events
+    assert events[-1].current_file == "config.json"
+    assert events[-1].downloaded_bytes == 5

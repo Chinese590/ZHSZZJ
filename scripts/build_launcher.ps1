@@ -1,5 +1,6 @@
 param(
     [Parameter(Mandatory=$true)][string]$Repository,
+    [Parameter(Mandatory=$true)][string]$Version,
     [string]$OutputDirectory = "$PSScriptRoot\..\artifacts\launcher"
 )
 
@@ -21,5 +22,8 @@ dotnet publish $project `
     --self-contained true `
     -p:PublishSingleFile=true `
     -p:IncludeNativeLibrariesForSelfExtract=true `
+    -p:Version=$Version `
+    -p:AssemblyVersion=$Version.0 `
+    -p:FileVersion=$Version.0 `
     -o $OutputDirectory
 if ($LASTEXITCODE -ne 0) { throw "Launcher publish failed with exit code $LASTEXITCODE" }

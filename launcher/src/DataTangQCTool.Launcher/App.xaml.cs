@@ -41,6 +41,7 @@ public partial class App : Application
                 new PackageInstaller(),
                 healthChecker,
                 new ApplicationLauncher(),
+                window,
                 window);
             window.AttachCoordinator(coordinator, configStore);
             MainWindow = window;

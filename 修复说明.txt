@@ -1,0 +1,42 @@
+﻿数据堂质检工具 模型下载与一键更新修复 v1.0.9
+================================================
+
+一、模型下载失败修复
+错误：Hugging Face 模型文件下载失败（config.json）：
+'NoneType' object has no attribute 'write'
+
+根因：
+主程序由 pythonw.exe 启动时，sys.stderr 为空；tqdm 关闭进度条时仍尝试
+执行 stderr.write()，导致第一个模型文件下载失败。
+
+修复：
+- 为 Hugging Face 自定义进度类提供内部静默输出流。
+- 即使 pythonw.exe 没有控制台输出，真实字节进度仍能正常回传界面。
+- 新增回归测试模拟 sys.stderr=None。
+
+二、新增更新提示与直接更新
+- 启动时检测到新版本后弹出更新提示。
+- 显示当前版本和新版本。
+- 点击“是”后自动下载、安装并启动，不需要手动下载整个程序包。
+- 点击“否”后继续启动当前版本。
+- 只下载发生变化的组件；仅主程序更新时不重复下载 Python 运行库。
+- GitHub Release 的运行库版本改为依赖指纹，运行库依赖未变化时后续版本复用本地运行库。
+
+三、应用方法
+1. 解压本修复包。
+2. 将其中的 .github、desktop、launcher、scripts、tests 五个文件夹
+   复制到 GitHub Desktop 本地仓库根目录。
+3. 出现替换提示时选择替换目标中的文件。
+4. Summary 填写：修复模型下载并增加一键更新。
+5. Commit to main，然后 Push origin。
+6. GitHub Actions 新建 Run workflow，版本填写 1.0.9。
+7. 构建成功后，现有启动器可自动更新主程序和运行库到 v1.0.9。
+8. 更新提示属于新版启动器功能，因此需要从 v1.0.9 Release 替换启动器一次；
+   从此以后检测到新版本会直接弹窗更新，不再手动下载整套程序。
+
+四、验证
+- 模型 pythonw 无 stderr 回归测试：通过。
+- 静态、模型及非界面业务测试：50 项通过。
+- Python 语法编译：通过。
+- GitHub Actions YAML 与清单 JSON 解析：通过。
+- .NET/xUnit 的最终编译由上传后的 Windows GitHub Actions 验证。

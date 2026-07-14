@@ -87,7 +87,9 @@ def test_startup_checks_updates_and_falls_back_to_healthy_local_install_offline(
     assert "if (manifest is null)" in source
     assert "if (localIsHealthy)" in source
     assert '"已离线启动本地版本。"' in source
-    assert "if (localIsHealthy && !IsUpdateRequired(state!, manifest))" in source
+    assert "runtimeNeedsUpdate" in source
+    assert "appNeedsUpdate" in source
+    assert "ConfirmUpdateAsync" in source
     assert "IsRemoteNewer" in source
 
 
@@ -154,6 +156,8 @@ def test_xunit_tests_cover_phase1_contracts():
         "Healthy_local_install_checks_manifest_and_starts_when_current",
         "Healthy_local_install_updates_when_manifest_is_newer",
         "Healthy_local_install_starts_offline_when_manifest_fetch_fails",
+        "Declining_available_update_starts_current_version_without_downloading",
+        "App_only_update_does_not_redownload_runtime",
         "Health_check_executes_embedded_python_and_imports_required_packages",
         "Start_rejects_non_python_entrypoint_before_spawning_process",
     ]
@@ -283,3 +287,37 @@ def test_model_manager_reports_byte_progress():
     assert "list_repo_tree" in source
     assert "hf_hub_download" in source
     assert '"tqdm_class": progress_class' in source
+
+
+def test_update_prompt_and_component_selective_download_are_wired():
+    progress = read(LAUNCHER / "Services" / "StartupProgress.cs")
+    coordinator = read(LAUNCHER / "Services" / "StartupCoordinator.cs")
+    window = read(LAUNCHER / "MainWindow.xaml.cs")
+    app = read(LAUNCHER / "App.xaml.cs")
+    assert "interface IUpdatePrompt" in progress
+    assert "ConfirmUpdateAsync" in coordinator
+    assert "runtimeNeedsUpdate" in coordinator
+    assert "appNeedsUpdate" in coordinator
+    assert "是否立即更新" in window
+    assert "IUpdatePrompt" in window
+    assert "window);" in app
+
+
+
+def test_model_progress_works_under_pythonw_without_stderr():
+    source = read(ROOT / "desktop" / "production" / "app" / "model_manager.py")
+    tests = read(ROOT / "desktop" / "tests" / "test_model_manager.py")
+    assert "class _SilentProgressStream" in source
+    assert 'kwargs["file"] = _SilentProgressStream()' in source
+    assert "test_progress_tqdm_works_when_pythonw_has_no_stderr" in tests
+
+
+def test_release_uses_stable_runtime_fingerprint_and_versioned_launcher():
+    workflow = read(ROOT / ".github" / "workflows" / "release-stable.yml")
+    build_script = read(ROOT / "scripts" / "build_launcher.ps1")
+    assert "$runtimeFingerprint" in workflow
+    assert "$runtimeVersion = 'runtime-'" in workflow
+    assert "-Version '${{ inputs.version }}'" in workflow
+    assert "[Parameter(Mandatory=$true)][string]$Version" in build_script
+    assert "-p:Version=$Version" in build_script
+

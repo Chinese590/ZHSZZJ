@@ -50,7 +50,7 @@ jobs:
 
       - name: Build single-file launcher
         shell: pwsh
-        run: ./scripts/build_launcher.ps1 -Repository '${{ github.repository }}' -OutputDirectory ./artifacts/launcher
+        run: ./scripts/build_launcher.ps1 -Repository '${{ github.repository }}' -Version '${{ inputs.version }}' -OutputDirectory ./artifacts/launcher
 
       - name: Generate stable manifest and checksums
         shell: pwsh
@@ -62,11 +62,21 @@ jobs:
           $app = Resolve-Path './artifacts/app.zip'
           $runtimeHash = (Get-FileHash $runtime -Algorithm SHA256).Hash.ToLowerInvariant()
           $appHash = (Get-FileHash $app -Algorithm SHA256).Hash.ToLowerInvariant()
+          $runtimeInputs = @(
+            './release/requirements/runtime-requirements.lock',
+            './scripts/build_runtime.ps1'
+          )
+          $runtimeFingerprintText = ($runtimeInputs | ForEach-Object {
+            (Get-FileHash $_ -Algorithm SHA256).Hash.ToLowerInvariant()
+          }) -join ':'
+          $runtimeFingerprintBytes = [Text.Encoding]::UTF8.GetBytes($runtimeFingerprintText)
+          $runtimeFingerprint = [Convert]::ToHexString([System.Security.Cryptography.SHA256]::HashData($runtimeFingerprintBytes)).ToLowerInvariant()
+          $runtimeVersion = 'runtime-' + $runtimeFingerprint.Substring(0, 12)
           $manifest = @{
             schema_version = 1
             channel = 'stable'
             runtime = @{
-              version = $version
+              version = $runtimeVersion
               url = "https://github.com/$repo/releases/download/$tag/runtime-win-x64.zip"
               sha256 = $runtimeHash
               size = (Get-Item $runtime).Length

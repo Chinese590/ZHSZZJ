@@ -27,3 +27,24 @@ public sealed class NullStartupProgress : IStartupProgress
     private NullStartupProgress() { }
     public void Report(StartupProgress progress) { }
 }
+
+
+public sealed record UpdateInfo(
+    string CurrentRuntimeVersion,
+    string CurrentAppVersion,
+    string NewRuntimeVersion,
+    string NewAppVersion,
+    bool RuntimeWillUpdate,
+    bool AppWillUpdate);
+
+public interface IUpdatePrompt
+{
+    Task<bool> ConfirmUpdateAsync(UpdateInfo update, CancellationToken cancellationToken);
+}
+
+public sealed class AlwaysAcceptUpdatePrompt : IUpdatePrompt
+{
+    public static AlwaysAcceptUpdatePrompt Instance { get; } = new();
+    private AlwaysAcceptUpdatePrompt() { }
+    public Task<bool> ConfirmUpdateAsync(UpdateInfo update, CancellationToken cancellationToken) => Task.FromResult(true);
+}
