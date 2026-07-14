@@ -65,15 +65,17 @@ public sealed class ApplicationLauncher : IApplicationLauncher
         {
             throw new InvalidDataException("主程序 entrypoint 必须是 .py 文件。");
         }
-        var moduleName = normalizedEntrypoint[..^3].Replace('/', '.');
-        var process = Process.Start(new ProcessStartInfo
+        var startInfo = new ProcessStartInfo
         {
             FileName = pythonw,
-            Arguments = $"-m {moduleName} --cache-root \"{layout.Root}\"",
             WorkingDirectory = appDirectory,
             UseShellExecute = false,
             CreateNoWindow = true
-        });
+        };
+        startInfo.ArgumentList.Add(entrypoint);
+        startInfo.ArgumentList.Add("--cache-root");
+        startInfo.ArgumentList.Add(layout.Root);
+        var process = Process.Start(startInfo);
         if (process is null)
         {
             throw new InvalidOperationException("主程序启动失败。" );

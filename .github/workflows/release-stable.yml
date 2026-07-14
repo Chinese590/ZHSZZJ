@@ -37,9 +37,11 @@ jobs:
         shell: pwsh
         run: |
           & './build/runtime/runtime-win-x64/python.exe' -m pip install pytest==8.3.5 pyyaml==6.0.2 pygments==2.19.2
-          $env:PYTHONPATH = (Resolve-Path './desktop/production').Path
           $env:QT_QPA_PLATFORM = 'offscreen'
-          & './build/runtime/runtime-win-x64/python.exe' -m pytest tests/static desktop/tests -v
+          $productionRoot = (Resolve-Path './desktop/production').Path
+          $productionLiteral = ConvertTo-Json -InputObject $productionRoot -Compress
+          $testCode = 'import sys; sys.path.insert(0, ' + $productionLiteral + '); import pytest; raise SystemExit(pytest.main(["tests/static", "desktop/tests", "-v"]))'
+          & './build/runtime/runtime-win-x64/python.exe' -c $testCode
 
       - name: Build desktop app package
         shell: pwsh

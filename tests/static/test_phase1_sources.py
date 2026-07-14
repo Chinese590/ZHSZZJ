@@ -167,7 +167,9 @@ def test_production_app_package_is_used_and_queue_matches_latest_requirement():
 
 def test_release_workflow_runs_full_desktop_test_suite_with_packaged_runtime():
     workflow = read(ROOT / ".github" / "workflows" / "release-stable.yml")
-    assert "build/runtime/runtime-win-x64/python.exe' -m pytest tests/static desktop/tests -v" in workflow
+    assert "PYTHONPATH" not in workflow
+    assert "sys.path.insert(0, " in workflow
+    assert 'pytest.main([\"tests/static\", \"desktop/tests\", \"-v\"])' in workflow
     assert "QT_QPA_PLATFORM = 'offscreen'" in workflow
 
 
@@ -191,12 +193,21 @@ def test_main_window_exposes_model_download_and_advisory_compare_only():
     assert "pass_group" not in source[source.index("def run_ai_compare"):source.index("def open_model_dialog")]
 
 
-def test_application_launcher_derives_module_after_validating_python_entrypoint():
+def test_application_launcher_executes_absolute_script_after_validating_entrypoint():
     source = read(LAUNCHER / "Services" / "ProcessServices.cs")
     assert 'var normalizedEntrypoint = state.AppEntrypoint.Replace' in source
     assert 'EndsWith(".py", StringComparison.OrdinalIgnoreCase)' in source
-    assert 'var moduleName = normalizedEntrypoint[..^3].Replace' in source
-    assert ".Replace('/', '.').EndsWith" not in source
+    assert 'startInfo.ArgumentList.Add(entrypoint)' in source
+    assert 'startInfo.ArgumentList.Add("--cache-root")' in source
+    assert 'startInfo.ArgumentList.Add(layout.Root)' in source
+    assert 'Arguments = $"-m ' not in source
+
+
+def test_app_entrypoint_bootstraps_package_root_for_embedded_python():
+    source = read(ROOT / "desktop" / "production" / "app" / "main.py")
+    assert "APP_ROOT = Path(__file__).resolve().parents[1]" in source
+    assert "sys.path.insert(0, str(APP_ROOT))" in source
+    assert source.index("sys.path.insert(0, str(APP_ROOT))") < source.index("from app.startup")
 
 
 def test_runtime_health_check_covers_core_and_optional_model_dependencies():
