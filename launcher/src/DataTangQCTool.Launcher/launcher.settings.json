@@ -1,0 +1,4 @@
+{
+  "manifest_url": "https://github.com/OWNER/REPOSITORY/releases/latest/download/stable-manifest.json",
+  "allowed_release_prefix": "https://github.com/OWNER/REPOSITORY/releases/download/"
+}

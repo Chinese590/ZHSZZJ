@@ -1,0 +1,12 @@
+.worktrees/
+**/bin/
+**/obj/
+.vs/
+__pycache__/
+.pytest_cache/
+*.part
+.venv/
+build/
+artifacts/
+*.zip
+*.tgz

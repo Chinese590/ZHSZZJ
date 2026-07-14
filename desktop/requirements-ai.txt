@@ -1,0 +1,4 @@
+-r requirements.txt
+huggingface-hub>=0.33,<1
+onnxruntime>=1.22,<2
+numpy>=2.2,<3

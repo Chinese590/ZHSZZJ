@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/datatang/runtime-manifest.schema.json",
+  "title": "DataTang QC Tool Stable Release Manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "channel", "runtime", "app"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "channel": { "type": "string", "minLength": 1 },
+    "runtime": { "$ref": "#/$defs/asset" },
+    "app": {
+      "allOf": [
+        { "$ref": "#/$defs/asset" },
+        {
+          "type": "object",
+          "required": ["entrypoint"],
+          "properties": {
+            "entrypoint": { "type": "string", "minLength": 1 }
+          }
+        }
+      ]
+    }
+  },
+  "$defs": {
+    "asset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "url", "sha256", "size"],
+      "properties": {
+        "version": { "type": "string", "minLength": 1 },
+        "url": {
+          "type": "string",
+          "pattern": "^https://github\\.com/.+/releases/download/.+$"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "size": { "type": "integer", "minimum": 1 },
+        "entrypoint": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}
