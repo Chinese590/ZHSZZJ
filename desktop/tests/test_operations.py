@@ -128,3 +128,28 @@ def test_fail_group_already_in_rework_appends_in_place_and_undo_restores(tmp_pat
     service.undo_last()
     assert folder.exists()
     assert note.read_text(encoding="utf-8") == "原返修记录\n"
+
+
+def test_pass_and_fail_records_capture_advisory_ai_context(tmp_path: Path):
+    from app.ai_review_models import AiReviewResult, ReviewFinding
+
+    make_group(tmp_path, "待质检", "AI人员", "000008")
+    group = scan_status(tmp_path, "待质检")[0]
+    service = QualityOperations(tmp_path)
+    ai_review = AiReviewResult(
+        stage="online",
+        provider="gemini",
+        score=44.5,
+        risk="high",
+        recommendation="repair",
+        summary="主体结构异常",
+        findings=[ReviewFinding("结构变形", "high", 95, "结构畸形")],
+    )
+
+    record = service.pass_group(group, ai_review=ai_review)
+
+    assert record.ai_detected is True
+    assert record.ai_score == 44.5
+    assert record.ai_provider == "gemini"
+    assert record.ai_issues == ["结构变形"]
+    assert '"api_key"' not in service.log_path.read_text(encoding="utf-8")

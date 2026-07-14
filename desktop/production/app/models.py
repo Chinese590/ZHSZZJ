@@ -36,6 +36,14 @@ class OperationRecord:
     operation_id: str = ""
     issues: list[str] = field(default_factory=list)
     remark: str = ""
+    ai_detected: bool = False
+    ai_stage: str = ""
+    ai_provider: str = ""
+    ai_score: float | None = None
+    ai_risk: str = ""
+    ai_recommendation: str = ""
+    ai_issues: list[str] = field(default_factory=list)
+    ai_summary: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

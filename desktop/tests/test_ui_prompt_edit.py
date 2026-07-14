@@ -26,6 +26,7 @@ def test_prompts_are_editable_saved_in_place_and_pixels_are_shown(tmp_path: Path
     folder = make_group(tmp_path)
     window = MainWindow()
     window.settings.remove("last_root")
+    window.online_settings.auto_local = False
     window.set_root(tmp_path)
     app.processEvents()
 
@@ -48,6 +49,7 @@ def test_delete_button_is_enabled_for_selected_group(tmp_path: Path):
     make_group(tmp_path)
     window = MainWindow()
     window.settings.remove("last_root")
+    window.online_settings.auto_local = False
     window.set_root(tmp_path)
     app.processEvents()
 
@@ -61,6 +63,7 @@ def test_delete_current_group_requires_confirmation_and_removes_queue_item(tmp_p
     folder = make_group(tmp_path)
     window = MainWindow()
     window.settings.remove("last_root")
+    window.online_settings.auto_local = False
     window.set_root(tmp_path)
     app.processEvents()
 
@@ -104,6 +107,7 @@ def test_ai_model_button_uses_selected_cache_root(tmp_path: Path):
     cache_root = tmp_path / "程序缓存"
     window = MainWindow(cache_root=cache_root)
     window.settings.remove("last_root")
+    window.online_settings.auto_local = False
     window.set_root(tmp_path)
     app.processEvents()
 

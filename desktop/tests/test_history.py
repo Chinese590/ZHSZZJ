@@ -59,3 +59,52 @@ def test_load_effective_records_excludes_undone_and_filters_date(tmp_path: Path)
     assert len(records) == 1
     assert records[0].operation_id == "b"
     assert records[0].person == "李四"
+
+
+def test_history_loads_new_ai_fields_and_old_records_remain_compatible(tmp_path: Path):
+    import json
+    from app.history import load_effective_records
+
+    log_dir = tmp_path / ".质检工具"
+    log_dir.mkdir()
+    log_path = log_dir / "operation_log.jsonl"
+    log_path.write_text(
+        json.dumps({
+            "timestamp": "2026-07-15 10:00:00",
+            "action": "不通过",
+            "person": "张三",
+            "group_name": "000001",
+            "source_status": "待质检",
+            "source_path": "x",
+            "destination_path": "y",
+            "operation_id": "new",
+            "issues": ["结构变形"],
+            "remark": "返修",
+            "ai_detected": True,
+            "ai_stage": "online",
+            "ai_provider": "openai",
+            "ai_score": 51.2,
+            "ai_risk": "high",
+            "ai_recommendation": "repair",
+            "ai_issues": ["结构变形"],
+            "ai_summary": "结构异常"
+        }, ensure_ascii=False) + "\n" +
+        json.dumps({
+            "timestamp": "2026-07-15 11:00:00",
+            "action": "通过",
+            "person": "李四",
+            "group_name": "000002",
+            "source_status": "待质检",
+            "source_path": "a",
+            "destination_path": "b",
+            "operation_id": "old"
+        }, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+
+    records = load_effective_records(tmp_path)
+
+    assert records[0].ai_provider == "openai"
+    assert records[0].ai_score == 51.2
+    assert records[1].ai_detected is False
+    assert records[1].ai_score is None

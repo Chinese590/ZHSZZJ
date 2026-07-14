@@ -34,6 +34,14 @@ def test_required_phase1_files_exist():
         LAUNCHER / "Services" / "PackageInstaller.cs",
         LAUNCHER / "Services" / "StartupCoordinator.cs",
         ROOT / ".github" / "workflows" / "release-stable.yml",
+        ROOT / "desktop" / "production" / "app" / "ai_review_models.py",
+        ROOT / "desktop" / "production" / "app" / "local_review.py",
+        ROOT / "desktop" / "production" / "app" / "online_review.py",
+        ROOT / "desktop" / "production" / "app" / "ai_review_store.py",
+        ROOT / "desktop" / "production" / "app" / "ai_settings.py",
+        ROOT / "desktop" / "production" / "app" / "ui" / "ai_review_panel.py",
+        ROOT / "desktop" / "production" / "app" / "ui" / "ai_review_worker.py",
+        ROOT / "desktop" / "production" / "app" / "ui" / "ai_settings_dialog.py",
     ]
     missing = [str(path.relative_to(ROOT)) for path in required if not path.is_file()]
     assert not missing, missing
@@ -194,12 +202,25 @@ def test_optional_huggingface_model_is_cached_under_selected_root_and_never_requ
     assert "onnxruntime==" in requirements
 
 
-def test_main_window_exposes_model_download_and_advisory_compare_only():
-    source = read(ROOT / "desktop" / "production" / "app" / "ui" / "main_window.py")
-    assert 'QPushButton("AI辅助模型")' in source
-    assert 'QPushButton("AI辅助比较")' in source
-    assert "仅供人工参考" in source
-    assert "pass_group" not in source[source.index("def run_ai_compare"):source.index("def open_model_dialog")]
+def test_ai_consistency_assistant_is_integrated_without_automatic_file_actions():
+    window = read(ROOT / "desktop" / "production" / "app" / "ui" / "main_window.py")
+    panel = read(ROOT / "desktop" / "production" / "app" / "ui" / "ai_review_panel.py")
+    worker = read(ROOT / "desktop" / "production" / "app" / "ui" / "ai_review_worker.py")
+    online = read(ROOT / "desktop" / "production" / "app" / "online_review.py")
+    reports = read(ROOT / "desktop" / "production" / "app" / "reports.py")
+
+    assert 'QPushButton("AI辅助模型")' in window
+    assert 'addTab(self.ai_review_panel, "AI一致性质检")' in window
+    assert 'QPushButton("本地AI检测")' in panel
+    assert 'QPushButton("在线深度复核")' in panel
+    assert "AI只提供辅助建议，不会自动通过、返修、删除或移动文件夹。" in panel
+    assert 'provider in {"openai", "gemini", "custom"}' in online
+    assert "smart_trigger" in window
+    assert 'create_sheet("AI辅助统计")' in reports
+
+    forbidden = ("pass_group(", "fail_group(", "delete_group(", "shutil.move(", "send2trash(")
+    for source in (worker, online):
+        assert not any(token in source for token in forbidden)
 
 
 def test_application_launcher_executes_absolute_script_after_validating_entrypoint():

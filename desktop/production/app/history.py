@@ -51,6 +51,18 @@ def load_effective_records(root: Path | str, date_prefix: str | None = None) -> 
                         operation_id=operation_id,
                         issues=[str(item) for item in payload.get("issues", [])],
                         remark=str(payload.get("remark", "")),
+                        ai_detected=bool(payload.get("ai_detected", False)),
+                        ai_stage=str(payload.get("ai_stage", "")),
+                        ai_provider=str(payload.get("ai_provider", "")),
+                        ai_score=(
+                            None
+                            if payload.get("ai_score") is None
+                            else float(payload.get("ai_score"))
+                        ),
+                        ai_risk=str(payload.get("ai_risk", "")),
+                        ai_recommendation=str(payload.get("ai_recommendation", "")),
+                        ai_issues=[str(item) for item in payload.get("ai_issues", [])],
+                        ai_summary=str(payload.get("ai_summary", "")),
                     )
                 except (TypeError, ValueError):
                     continue

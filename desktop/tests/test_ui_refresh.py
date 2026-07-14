@@ -24,6 +24,7 @@ def test_unchanged_refresh_preserves_review_inputs(tmp_path: Path):
     make_group(tmp_path)
     window = MainWindow()
     window.settings.remove("last_root")
+    window.online_settings.auto_local = False
     window.set_root(tmp_path)
     app.processEvents()
 

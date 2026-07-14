@@ -9,6 +9,7 @@ from pathlib import Path
 
 from send2trash import send2trash
 
+from .ai_review_models import AiReviewResult
 from .models import DataGroup, OperationRecord
 
 
@@ -67,7 +68,7 @@ class QualityOperations:
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(source), str(target))
 
-    def pass_group(self, group: DataGroup) -> OperationRecord:
+    def pass_group(self, group: DataGroup, ai_review: AiReviewResult | None = None) -> OperationRecord:
         source = group.folder
         target = self._target(group, "质检完成")
         self._check_move(source, target)
@@ -81,13 +82,20 @@ class QualityOperations:
             source_path=str(source),
             destination_path=str(target),
             operation_id=uuid.uuid4().hex,
+            **self._ai_record_fields(ai_review),
         )
         self._records.append(record)
         self._undo_stack.append(_UndoEntry(record=record))
         self._append_log(record.to_dict())
         return record
 
-    def fail_group(self, group: DataGroup, issues: list[str], remark: str) -> OperationRecord:
+    def fail_group(
+        self,
+        group: DataGroup,
+        issues: list[str],
+        remark: str,
+        ai_review: AiReviewResult | None = None,
+    ) -> OperationRecord:
         clean_issues = [item.strip() for item in issues if item.strip()]
         clean_remark = remark.strip()
         if not clean_issues and not clean_remark:
@@ -142,6 +150,7 @@ class QualityOperations:
             operation_id=uuid.uuid4().hex,
             issues=clean_issues,
             remark=clean_remark,
+            **self._ai_record_fields(ai_review),
         )
         self._records.append(record)
         self._undo_stack.append(
@@ -155,6 +164,22 @@ class QualityOperations:
         self._append_log(record.to_dict())
         return record
 
+
+
+    @staticmethod
+    def _ai_record_fields(ai_review: AiReviewResult | None) -> dict[str, object]:
+        if ai_review is None:
+            return {}
+        return {
+            "ai_detected": True,
+            "ai_stage": ai_review.stage,
+            "ai_provider": ai_review.provider,
+            "ai_score": ai_review.score,
+            "ai_risk": ai_review.risk,
+            "ai_recommendation": ai_review.recommendation,
+            "ai_issues": ai_review.issue_categories,
+            "ai_summary": ai_review.summary,
+        }
 
     def delete_group(self, group: DataGroup) -> OperationRecord:
         """Move one complete data-group folder to the operating system recycle bin.

@@ -8,6 +8,9 @@ from pathlib import Path
 
 from PySide6 import QtCore, QtGui, QtWidgets
 
+from ..ai_review_models import AiReviewResult
+from ..ai_review_store import AiReviewStore, image_pair_signature
+from ..ai_settings import load_online_settings, save_online_settings
 from ..history import load_effective_records
 from ..models import DataGroup
 from ..model_manager import ModelManager
@@ -22,7 +25,9 @@ from ..scanner import (
 )
 from ..watcher import DirectoryWatcher
 from .image_viewer import ZoomableImageView
-from .ai_compare_worker import AiCompareWorker
+from .ai_review_panel import AiReviewPanel
+from .ai_review_worker import AiReviewWorker
+from .ai_settings_dialog import AiSettingsDialog
 from .model_download_dialog import ModelDownloadDialog
 
 
@@ -58,10 +63,18 @@ class MainWindow(QtWidgets.QMainWindow):
         self._dirty_prompt_fields: set[str] = set()
         self._current_images_ok = False
         self._ai_thread: QtCore.QThread | None = None
-        self._ai_worker: AiCompareWorker | None = None
+        self._ai_worker: AiReviewWorker | None = None
+        self._ai_mode: str = ""
+        self._ai_auto_request = False
+        self._ai_task_context: tuple[str, str, str, str, str] | None = None
+        self._pending_smart_online_signature: str | None = None
+        self._current_ai_signature = ""
+        self._current_ai_result: AiReviewResult | None = None
+        self.ai_review_store: AiReviewStore | None = None
         self.watcher = DirectoryWatcher(self)
         self.watcher.changed.connect(self._schedule_refresh)
         self.settings = QtCore.QSettings("DataTang", "QualityControlTool")
+        self.online_settings = load_online_settings(self.settings)
 
         self.refresh_debounce = QtCore.QTimer(self)
         self.refresh_debounce.setSingleShot(True)
@@ -228,8 +241,19 @@ class MainWindow(QtWidgets.QMainWindow):
         info_layout.addWidget(self.remark_edit)
         info_layout.addStretch(1)
         info_scroll.setWidget(info_content)
-        main_splitter.addWidget(info_scroll)
-        main_splitter.setSizes([280, 1000, 390])
+
+        self.info_tabs = QtWidgets.QTabWidget()
+        self.info_tabs.addTab(info_scroll, "质检信息")
+        self.ai_review_panel = AiReviewPanel()
+        self.ai_review_panel.local_requested.connect(self.run_local_review)
+        self.ai_review_panel.online_requested.connect(self.run_online_review)
+        self.ai_review_panel.settings_requested.connect(self.open_ai_settings)
+        self.ai_review_panel.adopt_tags_requested.connect(self.adopt_ai_tags)
+        self.ai_review_panel.adopt_remark_requested.connect(self.adopt_ai_remark)
+        self.ai_review_panel.clear_requested.connect(self.clear_ai_review)
+        self.info_tabs.addTab(self.ai_review_panel, "AI一致性质检")
+        main_splitter.addWidget(self.info_tabs)
+        main_splitter.setSizes([280, 1000, 430])
 
         # Bottom action bar
         action_bar = QtWidgets.QHBoxLayout()
@@ -243,9 +267,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self.model_button = QtWidgets.QPushButton("AI辅助模型")
         self.model_button.clicked.connect(self.open_model_dialog)
         self.model_button.setEnabled(self.model_manager is not None)
-        self.ai_compare_button = QtWidgets.QPushButton("AI辅助比较")
-        self.ai_compare_button.clicked.connect(self.run_ai_compare)
-        self.ai_compare_button.setEnabled(False)
         self.delete_button = QtWidgets.QPushButton("删除该组文件夹")
         self.delete_button.setObjectName("deleteButton")
         self.delete_button.clicked.connect(self.delete_current_group)
@@ -268,7 +289,6 @@ class MainWindow(QtWidgets.QMainWindow):
         action_bar.addStretch(1)
         action_bar.addWidget(self.undo_button)
         action_bar.addWidget(self.model_button)
-        action_bar.addWidget(self.ai_compare_button)
         action_bar.addWidget(self.delete_button)
         action_bar.addSpacing(8)
         action_bar.addWidget(self.pass_button)
@@ -351,6 +371,12 @@ class MainWindow(QtWidgets.QMainWindow):
             QLabel#summaryPill { background: white; border: 1px solid #D6DBE1; border-radius: 12px; padding: 5px 12px; min-width: 95px; }
             QLabel#hintLabel { color: #6F7882; font-size: 12px; }
             QLabel#pixelLabel { color: #5E6B78; font-size: 12px; padding-left: 8px; }
+            QLabel#aiSource { font-weight: 700; color: #245B8F; }
+            QLabel#aiMetricValue { font-size: 18px; font-weight: 700; color: #1F4E78; }
+            QFrame#aiMetricCard { background: white; border: 1px solid #D6DBE1; border-radius: 6px; }
+            QTabWidget::pane { border: 1px solid #D6DBE1; border-radius: 6px; background: #F4F6F8; }
+            QTabBar::tab { background: #E8EDF2; padding: 8px 14px; margin-right: 2px; }
+            QTabBar::tab:selected { background: white; font-weight: 700; }
             QCheckBox { spacing: 6px; }
             QSplitter::handle { background: #DDE2E7; width: 4px; height: 4px; }
             """
@@ -385,6 +411,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.root_path = root
         self.operations = QualityOperations(root)
+        self.ai_review_store = AiReviewStore(root)
         self._queue_signature = None
         self.root_edit.setText(str(root))
         self.open_root_button.setEnabled(True)
@@ -509,6 +536,9 @@ class MainWindow(QtWidgets.QMainWindow):
             self._dirty_prompt_fields.clear()
             self.progress_label.setText(f"0 / {len(self.groups)}")
             self._clear_review_inputs()
+            self._current_ai_signature = ""
+            self._current_ai_result = None
+            self.ai_review_panel.clear_result()
             self._update_action_states()
             return
 
@@ -543,6 +573,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 if checkbox.text() == "文件缺失":
                     checkbox.setChecked(True)
                     break
+        self._load_ai_state_for_group(group)
         self._update_action_states()
 
     def _schedule_prompt_save(self) -> None:
@@ -614,6 +645,11 @@ class MainWindow(QtWidgets.QMainWindow):
         group = self.current_group()
         if group is None or self.operations is None:
             return
+        if self._ai_thread is not None:
+            QtWidgets.QMessageBox.information(
+                self, "AI检测进行中", "请等待AI一致性质检完成后再执行文件流转。"
+            )
+            return
         if not self._flush_prompt_saves(show_error=True):
             return
         if not group.is_complete:
@@ -623,7 +659,7 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         row = self.queue_list.currentRow()
         try:
-            self.operations.pass_group(group)
+            self.operations.pass_group(group, ai_review=self._current_ai_result)
         except (QualityOperationError, OSError) as exc:
             self._show_error("质检通过操作失败", exc)
             return
@@ -634,13 +670,18 @@ class MainWindow(QtWidgets.QMainWindow):
         group = self.current_group()
         if group is None or self.operations is None:
             return
+        if self._ai_thread is not None:
+            QtWidgets.QMessageBox.information(
+                self, "AI检测进行中", "请等待AI一致性质检完成后再执行文件流转。"
+            )
+            return
         if not self._flush_prompt_saves(show_error=True):
             return
         issues = [checkbox.text() for checkbox in self.issue_checks if checkbox.isChecked()]
         remark = self.remark_edit.toPlainText().strip()
         row = self.queue_list.currentRow()
         try:
-            self.operations.fail_group(group, issues, remark)
+            self.operations.fail_group(group, issues, remark, ai_review=self._current_ai_result)
         except (QualityOperationError, OSError) as exc:
             self._show_error("质检不通过操作失败", exc)
             return
@@ -652,6 +693,11 @@ class MainWindow(QtWidgets.QMainWindow):
     def delete_current_group(self) -> None:
         group = self.current_group()
         if group is None or self.operations is None:
+            return
+        if self._ai_thread is not None:
+            QtWidgets.QMessageBox.information(
+                self, "AI检测进行中", "请等待AI一致性质检完成后再删除数据组。"
+            )
             return
         if not self._flush_prompt_saves(show_error=True):
             return
@@ -736,8 +782,14 @@ class MainWindow(QtWidgets.QMainWindow):
         if output.suffix.lower() != ".xlsx":
             output = output.with_suffix(".xlsx")
         try:
-            daily_records = load_effective_records(self.root_path, date.today().isoformat())
-            export_report(self.root_path, output, daily_records)
+            day_prefix = date.today().isoformat()
+            daily_records = load_effective_records(self.root_path, day_prefix)
+            ai_reviews = (
+                self.ai_review_store.latest_reviews(day_prefix)
+                if self.ai_review_store is not None
+                else []
+            )
+            export_report(self.root_path, output, daily_records, ai_reviews=ai_reviews)
         except (OSError, ValueError) as exc:
             self._show_error("导出报表失败", exc)
             return
@@ -753,63 +805,226 @@ class MainWindow(QtWidgets.QMainWindow):
             self._open_in_file_manager(output.parent)
 
 
-    def run_ai_compare(self) -> None:
+    def _load_ai_state_for_group(self, group: DataGroup) -> None:
+        self._current_ai_result = None
+        self.ai_review_panel.clear_result()
+        if group.original_image is None or group.result_image is None or not self._current_images_ok:
+            self._current_ai_signature = ""
+            return
+        try:
+            signature = image_pair_signature(group.original_image, group.result_image)
+        except OSError as exc:
+            self._current_ai_signature = ""
+            self.statusBar().showMessage(f"读取AI检测图片签名失败：{exc}", 6000)
+            return
+        self._current_ai_signature = signature
+        cached = (
+            self.ai_review_store.latest_for_group(group.person, group.group_name, signature)
+            if self.ai_review_store is not None
+            else None
+        )
+        if cached is not None:
+            self._current_ai_result = cached
+            self.ai_review_panel.set_result(cached)
+            return
+        if self.online_settings.auto_local:
+            QtCore.QTimer.singleShot(220, lambda sig=signature: self._auto_local_if_current(sig))
+
+    def _auto_local_if_current(self, signature: str) -> None:
+        if (
+            signature == self._current_ai_signature
+            and self._current_ai_result is None
+            and self._ai_thread is None
+            and self.online_settings.auto_local
+        ):
+            self.run_local_review(auto=True)
+
+    @QtCore.Slot()
+    def run_local_review(self, auto: bool = False) -> None:
+        self._start_ai_review("local", auto=auto)
+
+    @QtCore.Slot()
+    def run_online_review(self, auto: bool = False) -> None:
+        if not self.online_settings.is_configured:
+            if auto:
+                return
+            QtWidgets.QMessageBox.information(
+                self,
+                "在线深度复核",
+                "在线服务尚未配置，请先填写提供商、模型和 API Key。",
+            )
+            self.open_ai_settings()
+            return
+        self._start_ai_review("online", auto=auto)
+
+    def _start_ai_review(self, mode: str, *, auto: bool) -> None:
         group = self.current_group()
         if (
             group is None
-            or self.model_manager is None
             or group.original_image is None
             or group.result_image is None
+            or not self._current_images_ok
+            or not self._current_ai_signature
             or self._ai_thread is not None
         ):
             return
-        if not self.model_manager.is_installed("onnx-community/dinov2-small"):
-            QtWidgets.QMessageBox.information(
-                self,
-                "AI辅助比较",
-                "请先点击“AI辅助模型”下载模型。",
-            )
-            return
-
-        self.ai_compare_button.setEnabled(False)
-        self.statusBar().showMessage("正在进行 AI 辅助比较……")
+        self._ai_mode = mode
+        self._ai_auto_request = auto
+        self._ai_task_context = (
+            group.status,
+            group.person,
+            group.group_name,
+            str(group.folder),
+            self._current_ai_signature,
+        )
+        busy_text = (
+            "正在进行本地一致性检测……"
+            if mode == "local"
+            else "正在进行在线深度复核……"
+        )
+        self.ai_review_panel.set_busy(True, busy_text)
+        self.statusBar().showMessage(busy_text)
         self._ai_thread = QtCore.QThread(self)
-        self._ai_worker = AiCompareWorker(
-            self.model_manager,
-            group.original_image,
-            group.result_image,
+        self._ai_worker = AiReviewWorker(
+            mode=mode,
+            signature=self._current_ai_signature,
+            original=group.original_image,
+            result=group.result_image,
+            model_manager=self.model_manager,
+            online_settings=self.online_settings if mode == "online" else None,
+            chinese_prompt=self.chinese_text.toPlainText(),
+            english_prompt=self.english_text.toPlainText(),
+            local_result=(
+                self._current_ai_result
+                if self._current_ai_result is not None and self._current_ai_result.stage == "local"
+                else None
+            ),
         )
         self._ai_worker.moveToThread(self._ai_thread)
         self._ai_thread.started.connect(self._ai_worker.run)
-        self._ai_worker.finished.connect(self._ai_compare_finished)
-        self._ai_worker.failed.connect(self._ai_compare_failed)
-        self._ai_worker.finished.connect(self._ai_thread.quit)
-        self._ai_worker.failed.connect(self._ai_thread.quit)
+        self._ai_worker.finished.connect(self._ai_review_finished)
+        self._ai_worker.failed.connect(self._ai_review_failed)
+        self._ai_worker.finished.connect(
+            self._ai_thread.quit, QtCore.Qt.ConnectionType.DirectConnection
+        )
+        self._ai_worker.failed.connect(
+            self._ai_thread.quit, QtCore.Qt.ConnectionType.DirectConnection
+        )
         self._ai_thread.finished.connect(self._ai_worker.deleteLater)
         self._ai_thread.finished.connect(self._ai_thread_finished)
         self._ai_thread.start()
+        self._update_action_states()
 
-    @QtCore.Slot(float)
-    def _ai_compare_finished(self, score: float) -> None:
-        percent = max(-1.0, min(1.0, score)) * 100
-        self.statusBar().showMessage(f"AI视觉相似度：{percent:.1f}%（仅供人工参考）", 10000)
-        QtWidgets.QMessageBox.information(
-            self,
-            "AI辅助比较完成",
-            f"原图与结果图的视觉特征相似度：{percent:.1f}%\n\n"
-            "该数值仅用于提醒，不会自动决定通过或不通过。",
-        )
+    @QtCore.Slot(object, str)
+    def _ai_review_finished(self, result: object, signature: str) -> None:
+        if not isinstance(result, AiReviewResult):
+            self._ai_review_failed("AI一致性质检返回了无效结果。", signature)
+            return
+        context = self._ai_task_context
+        if context is not None and self.ai_review_store is not None:
+            status, person, group_name, folder, task_signature = context
+            if task_signature == signature:
+                try:
+                    self.ai_review_store.append(
+                        status, person, group_name, folder, signature, result
+                    )
+                except OSError as exc:
+                    self.statusBar().showMessage(f"AI检测日志保存失败：{exc}", 8000)
+        applied = self._apply_ai_result(result, signature, auto_fill=True)
+        if applied:
+            self.statusBar().showMessage(
+                f"AI一致性质检完成：{result.score:.1f} 分 / "
+                f"{self._risk_label(result.risk)}",
+                10000,
+            )
+            if (
+                result.stage == "local"
+                and result.risk in {"medium", "high"}
+                and self.online_settings.smart_trigger
+                and self.online_settings.is_configured
+            ):
+                self._pending_smart_online_signature = signature
 
-    @QtCore.Slot(str)
-    def _ai_compare_failed(self, message: str) -> None:
+    def _apply_ai_result(
+        self, result: AiReviewResult, signature: str, *, auto_fill: bool
+    ) -> bool:
+        if signature != self._current_ai_signature:
+            return False
+        self._current_ai_result = result
+        self.ai_review_panel.set_result(result)
+        if auto_fill and result.issue_categories:
+            self.adopt_ai_tags()
+            if not self.remark_edit.toPlainText().strip():
+                self.adopt_ai_remark()
+        return True
+
+    @QtCore.Slot(str, str)
+    def _ai_review_failed(self, message: str, signature: str) -> None:
+        if signature != self._current_ai_signature:
+            return
         self.statusBar().showMessage(message, 10000)
-        QtWidgets.QMessageBox.warning(self, "AI辅助比较失败", message)
+        if not self._ai_auto_request:
+            QtWidgets.QMessageBox.warning(self, "AI一致性质检失败", message)
 
     @QtCore.Slot()
     def _ai_thread_finished(self) -> None:
+        pending_signature = self._pending_smart_online_signature
+        self._pending_smart_online_signature = None
         self._ai_thread = None
         self._ai_worker = None
+        self._ai_task_context = None
+        self._ai_mode = ""
+        self._ai_auto_request = False
+        self.ai_review_panel.set_busy(False)
         self._update_action_states()
+        if pending_signature and pending_signature == self._current_ai_signature:
+            QtCore.QTimer.singleShot(0, lambda: self.run_online_review(auto=True))
+        elif self._current_ai_result is None and self.online_settings.auto_local:
+            QtCore.QTimer.singleShot(0, lambda: self._auto_local_if_current(self._current_ai_signature))
+
+    def adopt_ai_tags(self) -> None:
+        if self._current_ai_result is None:
+            return
+        categories = set(self._current_ai_result.issue_categories)
+        for checkbox in self.issue_checks:
+            if checkbox.text() in categories:
+                checkbox.setChecked(True)
+        self.statusBar().showMessage("已采纳AI问题标签，可继续人工修改。", 4000)
+
+    def adopt_ai_remark(self) -> None:
+        if self._current_ai_result is None:
+            return
+        ai_remark = self._current_ai_result.remark.strip()
+        if not ai_remark:
+            return
+        current = self.remark_edit.toPlainText().strip()
+        if not current:
+            self.remark_edit.setPlainText(ai_remark)
+        elif ai_remark not in current:
+            self.remark_edit.setPlainText(current + "\n\n--- AI辅助建议 ---\n" + ai_remark)
+        self.statusBar().showMessage("已采纳AI返修备注，可继续人工修改。", 4000)
+
+    def clear_ai_review(self) -> None:
+        self._current_ai_result = None
+        self.ai_review_panel.clear_result()
+        self.statusBar().showMessage("已清空当前显示的AI结果，历史审计日志仍保留。", 5000)
+
+    def open_ai_settings(self) -> None:
+        dialog = AiSettingsDialog(self.online_settings, self)
+        if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
+            self.online_settings = dialog.settings_value()
+            save_online_settings(self.settings, self.online_settings)
+            self.statusBar().showMessage("AI一致性质检设置已保存。", 5000)
+            if (
+                self.online_settings.auto_local
+                and self._current_ai_result is None
+                and self._current_ai_signature
+            ):
+                QtCore.QTimer.singleShot(0, lambda: self._auto_local_if_current(self._current_ai_signature))
+
+    @staticmethod
+    def _risk_label(risk: str) -> str:
+        return {"low": "低风险", "medium": "中风险", "high": "高风险"}.get(risk, risk)
 
     def open_model_dialog(self) -> None:
         if self.model_manager is None:
@@ -847,27 +1062,25 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _update_action_states(self) -> None:
         group = self.current_group()
+        ai_idle = self._ai_thread is None
         self.pass_button.setEnabled(
-            group is not None and group.is_complete and self._current_images_ok
+            group is not None and group.is_complete and self._current_images_ok and ai_idle
         )
-        self.fail_button.setEnabled(group is not None)
-        self.delete_button.setEnabled(group is not None)
+        self.fail_button.setEnabled(group is not None and ai_idle)
+        self.delete_button.setEnabled(group is not None and ai_idle)
         self.previous_button.setEnabled(group is not None and self.queue_list.currentRow() > 0)
         self.next_button.setEnabled(
             group is not None and self.queue_list.currentRow() < len(self.groups) - 1
         )
         self.undo_button.setEnabled(self.operations is not None and self.operations.can_undo)
-        model_ready = (
-            self.model_manager is not None
-            and self.model_manager.is_installed("onnx-community/dinov2-small")
-        )
-        self.ai_compare_button.setEnabled(
+        ai_ready = (
             group is not None
             and group.original_image is not None
             and group.result_image is not None
-            and model_ready
+            and self._current_images_ok
             and self._ai_thread is None
         )
+        self.ai_review_panel.set_run_enabled(ai_ready)
 
     def _group_key(self, group: DataGroup) -> tuple[str, str, str]:
         return group.status, group.person, group.group_name
@@ -886,8 +1099,8 @@ class MainWindow(QtWidgets.QMainWindow):
         if self._ai_thread is not None:
             QtWidgets.QMessageBox.information(
                 self,
-                "AI辅助比较中",
-                "AI 辅助比较尚未完成，请等待完成后再关闭工具。",
+                "AI一致性质检中",
+                "AI 一致性质检尚未完成，请等待完成后再关闭工具。",
             )
             event.ignore()
             return
