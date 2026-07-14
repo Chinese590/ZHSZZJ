@@ -62,16 +62,55 @@ public sealed class StartupCoordinator
 
             _progress.Report(new StartupProgress(StartupStage.CheckingLocal, "检查本地运行库……"));
             var health = await _healthChecker.CheckAsync(layout, state, cancellationToken);
-            if (health.IsHealthy && state is not null)
+            var localIsHealthy = health.IsHealthy && state is not null;
+
+            _progress.Report(new StartupProgress(StartupStage.FetchingManifest, "检查 GitHub 更新……"));
+            ReleaseManifest? manifest = null;
+            Exception? manifestFailure = null;
+            try
             {
-                _progress.Report(new StartupProgress(StartupStage.Starting, "本地环境可用，正在启动……"));
-                await _applicationLauncher.StartAsync(layout, state, cancellationToken);
+                manifest = await _manifestClient.FetchAsync(cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                manifestFailure = ex;
+            }
+
+            if (manifest is null)
+            {
+                if (localIsHealthy)
+                {
+                    _progress.Report(new StartupProgress(
+                        StartupStage.Starting,
+                        $"无法检查更新，使用本地版本：{manifestFailure?.Message}"));
+                    await _applicationLauncher.StartAsync(layout, state!, cancellationToken);
+                    _progress.Report(new StartupProgress(StartupStage.Completed, "已离线启动本地版本。", 100));
+                    return StartupResult.Started(cacheRoot);
+                }
+
+                throw new InvalidOperationException(
+                    $"无法获取 GitHub 版本清单：{manifestFailure?.Message ?? "未知错误"}",
+                    manifestFailure);
+            }
+
+            if (localIsHealthy && !IsUpdateRequired(state!, manifest))
+            {
+                _progress.Report(new StartupProgress(StartupStage.Starting, "当前已是最新版本，正在启动……"));
+                await _applicationLauncher.StartAsync(layout, state!, cancellationToken);
                 _progress.Report(new StartupProgress(StartupStage.Completed, "启动完成。", 100));
                 return StartupResult.Started(cacheRoot);
             }
 
-            _progress.Report(new StartupProgress(StartupStage.FetchingManifest, "获取 GitHub 版本清单……"));
-            var manifest = await _manifestClient.FetchAsync(cancellationToken);
+            if (localIsHealthy)
+            {
+                _progress.Report(new StartupProgress(
+                    StartupStage.DownloadingRuntime,
+                    $"发现新版本：运行库 {manifest.Runtime.Version}，主程序 {manifest.App.Version}。"));
+            }
             var runtimeZip = Path.Combine(layout.Downloads, $"runtime-{manifest.Runtime.Version}.zip");
             var appZip = Path.Combine(layout.Downloads, $"app-{manifest.App.Version}.zip");
 
@@ -121,6 +160,25 @@ public sealed class StartupCoordinator
             _progress.Report(new StartupProgress(StartupStage.Error, ex.Message));
             return StartupResult.Failed(ex.Message);
         }
+    }
+
+
+    private static bool IsUpdateRequired(InstallState state, ReleaseManifest manifest)
+    {
+        return IsRemoteNewer(state.RuntimeVersion, manifest.Runtime.Version)
+            || IsRemoteNewer(state.AppVersion, manifest.App.Version);
+    }
+
+    private static bool IsRemoteNewer(string localVersion, string remoteVersion)
+    {
+        var localText = localVersion.Trim().TrimStart('v', 'V');
+        var remoteText = remoteVersion.Trim().TrimStart('v', 'V');
+        if (Version.TryParse(localText, out var local) && Version.TryParse(remoteText, out var remote))
+        {
+            return remote > local;
+        }
+
+        return !string.Equals(localText, remoteText, StringComparison.OrdinalIgnoreCase);
     }
 
     public async Task<CacheRootResult> SelectAndSaveNewCacheRootAsync(string? initialDirectory, CancellationToken cancellationToken)
