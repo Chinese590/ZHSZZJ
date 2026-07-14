@@ -37,6 +37,7 @@ jobs:
         shell: pwsh
         run: |
           & './build/runtime/runtime-win-x64/python.exe' -m pip install pytest==8.3.5 pyyaml==6.0.2 pygments==2.19.2
+          & './build/runtime/runtime-win-x64/python.exe' -c "import inspect; from huggingface_hub import hf_hub_download; assert 'tqdm_class' in inspect.signature(hf_hub_download).parameters"
           $env:QT_QPA_PLATFORM = 'offscreen'
           $productionRoot = (Resolve-Path './desktop/production').Path
           $productionLiteral = ConvertTo-Json -InputObject $productionRoot -Compress

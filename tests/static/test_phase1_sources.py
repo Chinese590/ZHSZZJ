@@ -260,3 +260,21 @@ def test_active_install_pointer_is_saved_only_after_new_version_health_check():
     save_index = source.index("stateStore.SaveAsync(nextState", healthy_index)
     start_index = source.index("_applicationLauncher.StartAsync(layout, nextState", save_index)
     assert check_index < healthy_index < save_index < start_index
+
+
+def test_model_download_dialog_uses_determinate_progress_and_detail_text():
+    source = (ROOT / "desktop/production/app/ui/model_download_dialog.py").read_text(encoding="utf-8")
+    assert "progress_changed = QtCore.Signal(object)" in source
+    assert "progress_callback=self.progress_changed.emit" in source
+    assert "self.progress.setRange(0, 1000)" in source
+    assert "self.progress_detail_label" in source
+    assert "self.progress.setRange(0, 0)" not in source
+
+
+def test_model_manager_reports_byte_progress():
+    source = (ROOT / "desktop/production/app/model_manager.py").read_text(encoding="utf-8")
+    assert "class ModelDownloadProgress" in source
+    assert "progress_callback" in source
+    assert "list_repo_tree" in source
+    assert "hf_hub_download" in source
+    assert '"tqdm_class": progress_class' in source
