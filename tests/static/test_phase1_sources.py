@@ -80,12 +80,15 @@ def test_download_service_has_range_resume_sha_and_part_file():
     assert "ReleaseUrlPolicy" in source
 
 
-def test_startup_short_circuits_network_when_local_install_is_healthy():
+def test_startup_checks_updates_and_falls_back_to_healthy_local_install_offline():
     source = read(LAUNCHER / "Services" / "StartupCoordinator.cs")
-    health_index = source.index("if (health.IsHealthy")
-    fetch_index = source.index("_manifestClient.FetchAsync")
-    assert health_index < fetch_index
-    assert "_applicationLauncher.StartAsync" in source[health_index:fetch_index]
+    assert '"检查 GitHub 更新……"' in source
+    assert "manifest = await _manifestClient.FetchAsync" in source
+    assert "if (manifest is null)" in source
+    assert "if (localIsHealthy)" in source
+    assert '"已离线启动本地版本。"' in source
+    assert "if (localIsHealthy && !IsUpdateRequired(state!, manifest))" in source
+    assert "IsRemoteNewer" in source
 
 
 def test_workflow_builds_on_windows_tests_and_releases_all_assets():
@@ -148,7 +151,9 @@ def test_xunit_tests_cover_phase1_contracts():
         "Download_sends_range_header_when_part_file_exists",
         "Download_deletes_part_file_when_sha256_mismatches",
         "Install_rejects_zip_path_traversal",
-        "Healthy_local_install_starts_without_fetching_manifest",
+        "Healthy_local_install_checks_manifest_and_starts_when_current",
+        "Healthy_local_install_updates_when_manifest_is_newer",
+        "Healthy_local_install_starts_offline_when_manifest_fetch_fails",
         "Health_check_executes_embedded_python_and_imports_required_packages",
         "Start_rejects_non_python_entrypoint_before_spawning_process",
     ]
