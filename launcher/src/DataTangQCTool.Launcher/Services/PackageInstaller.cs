@@ -39,7 +39,7 @@ public sealed class PackageInstaller : IPackageInstaller
                     throw new InvalidDataException($"安装包包含越界路径：{entry.FullName}");
                 }
 
-                if (entry.FullName.EndsWith('/', StringComparison.Ordinal) || entry.FullName.EndsWith('\\'))
+                if (entry.FullName.EndsWith("/", StringComparison.Ordinal) || entry.FullName.EndsWith("\\", StringComparison.Ordinal))
                 {
                     Directory.CreateDirectory(destination);
                     continue;
