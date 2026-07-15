@@ -16,6 +16,7 @@ from ..models import DataGroup
 from ..model_manager import ModelManager
 from ..operations import DestinationExistsError, QualityOperationError, QualityOperations
 from ..reports import export_report
+from ..shortcut_settings import load_shortcuts, save_shortcuts, shortcut_hint
 from ..scanner import (
     STATUS_FOLDERS,
     scan_all_counts,
@@ -29,6 +30,8 @@ from .ai_review_panel import AiReviewPanel
 from .ai_review_worker import AiReviewWorker
 from .ai_settings_dialog import AiSettingsDialog
 from .model_download_dialog import ModelDownloadDialog
+from .shortcut_controller import ShortcutController
+from .shortcut_settings_dialog import ShortcutSettingsDialog
 
 
 ISSUE_OPTIONS = (
@@ -75,6 +78,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.watcher.changed.connect(self._schedule_refresh)
         self.settings = QtCore.QSettings("DataTang", "QualityControlTool")
         self.online_settings = load_online_settings(self.settings)
+        self.shortcut_map = load_shortcuts(self.settings)
+        self.shortcut_controller: ShortcutController | None = None
 
         self.refresh_debounce = QtCore.QTimer(self)
         self.refresh_debounce.setSingleShot(True)
@@ -93,6 +98,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self._build_ui()
         self._apply_style()
+        self._install_shortcuts()
+        self._update_shortcut_labels()
         QtCore.QTimer.singleShot(0, self._restore_last_root)
         if self.cache_root is not None:
             self.statusBar().showMessage(f"程序缓存：{self.cache_root}", 8000)
@@ -115,11 +122,14 @@ class MainWindow(QtWidgets.QMainWindow):
         self.open_root_button = QtWidgets.QPushButton("打开目录")
         self.open_root_button.clicked.connect(self.open_root_folder)
         self.open_root_button.setEnabled(False)
+        self.shortcut_button = QtWidgets.QPushButton("快捷键设置")
+        self.shortcut_button.clicked.connect(self.open_shortcut_settings)
         top_bar.addWidget(QtWidgets.QLabel("项目目录："))
         top_bar.addWidget(self.root_edit, 1)
         top_bar.addWidget(browse_button)
         top_bar.addWidget(refresh_button)
         top_bar.addWidget(self.open_root_button)
+        top_bar.addWidget(self.shortcut_button)
         outer.addLayout(top_bar)
 
         summary_bar = QtWidgets.QHBoxLayout()
@@ -381,6 +391,149 @@ class MainWindow(QtWidgets.QMainWindow):
             QSplitter::handle { background: #DDE2E7; width: 4px; height: 4px; }
             """
         )
+
+    def _install_shortcuts(self) -> None:
+        callbacks = {
+            "previous": self.go_previous,
+            "next": self.go_next,
+            "pass": self.pass_current,
+            "prepare_repair": self.prepare_repair,
+            "submit_repair": self.submit_repair,
+            "focus_remark": self.prepare_repair,
+            "local_ai": self.run_local_review,
+            "online_ai": self.run_online_review,
+            "adopt_tags": self.adopt_ai_tags,
+            "adopt_remark": self.adopt_ai_remark,
+            "clear_ai": self.clear_ai_review,
+            "fit_both": self.fit_both_images,
+            "actual_size": self.actual_size_current_image,
+            "toggle_image_focus": self.toggle_image_focus,
+            "zoom_in": lambda: self.zoom_current_image(True),
+            "zoom_out": lambda: self.zoom_current_image(False),
+            "undo": self.undo_last,
+            "refresh": self.refresh_queue,
+            "cancel": self.cancel_shortcut_context,
+            "shortcut_help": self.open_shortcut_settings,
+            "ai_settings": self.open_ai_settings,
+            "delete_group": self.delete_current_group,
+        }
+        self.shortcut_controller = ShortcutController(
+            self,
+            self.shortcut_map,
+            callbacks,
+            remark_editor=self.remark_edit,
+        )
+
+    def open_shortcut_settings(self) -> None:
+        dialog = ShortcutSettingsDialog(self.shortcut_map, self)
+        if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
+            return
+        self.shortcut_map = save_shortcuts(self.settings, dialog.shortcuts_value())
+        if self.shortcut_controller is not None:
+            self.shortcut_controller.rebind(self.shortcut_map)
+        self._update_shortcut_labels()
+        self.statusBar().showMessage("快捷键设置已保存并立即生效。", 5000)
+
+    def _update_shortcut_labels(self) -> None:
+        def primary(action_id: str) -> str:
+            hint = shortcut_hint(self.shortcut_map, action_id)
+            return hint.split(" / ", 1)[0] if hint else "未设置"
+
+        self.shortcut_button.setText(f"快捷键设置（{primary('shortcut_help')}）")
+        self.previous_button.setText(f"上一组（{primary('previous')}）")
+        self.next_button.setText(f"下一组（{primary('next')}）")
+        self.undo_button.setText(f"撤销上一步（{primary('undo')}）")
+        self.pass_button.setText(f"质检通过（{primary('pass')}）")
+        self.fail_button.setText(f"提交返修（{primary('submit_repair')}）")
+        self.delete_button.setToolTip(
+            f"快捷键：{shortcut_hint(self.shortcut_map, 'delete_group')}；仍需两次确认"
+        )
+        self.ai_review_panel.local_button.setText(
+            f"本地AI检测（{primary('local_ai')}）"
+        )
+        self.ai_review_panel.online_button.setText(
+            f"在线深度复核（{primary('online_ai')}）"
+        )
+        self.ai_review_panel.adopt_tags_button.setText(
+            f"采纳AI标签（{primary('adopt_tags')}）"
+        )
+        self.ai_review_panel.adopt_remark_button.setText(
+            f"采纳AI备注（{primary('adopt_remark')}）"
+        )
+        self.ai_review_panel.clear_button.setText(
+            f"清空AI结果（{primary('clear_ai')}）"
+        )
+        self.remark_edit.setToolTip(
+            f"{primary('submit_repair')} 提交返修；Shift+Enter 换行；"
+            f"{primary('prepare_repair')} 快速进入备注"
+        )
+
+    def prepare_repair(self) -> None:
+        if self.current_group() is None:
+            return
+        self.info_tabs.setCurrentIndex(0)
+        self.remark_edit.setFocus(QtCore.Qt.FocusReason.ShortcutFocusReason)
+        cursor = self.remark_edit.textCursor()
+        cursor.movePosition(QtGui.QTextCursor.MoveOperation.End)
+        self.remark_edit.setTextCursor(cursor)
+        self.statusBar().showMessage(
+            "已进入返修备注：Enter 提交，Shift+Enter 换行。", 5000
+        )
+
+    def submit_repair(self) -> None:
+        self.fail_current()
+
+    def fit_both_images(self) -> None:
+        self.original_view.fit_to_view()
+        self.result_view.fit_to_view()
+        self.statusBar().showMessage("原图和结果图已适应窗口。", 2500)
+
+    def _focused_image_view(self) -> ZoomableImageView:
+        focus = QtWidgets.QApplication.focusWidget()
+        if focus is self.original_view or (
+            focus is not None and self.original_view.isAncestorOf(focus)
+        ):
+            return self.original_view
+        if focus is self.result_view or (
+            focus is not None and self.result_view.isAncestorOf(focus)
+        ):
+            return self.result_view
+        return self.result_view
+
+    def actual_size_current_image(self) -> None:
+        view = self._focused_image_view()
+        view.actual_size()
+        label = "原图" if view is self.original_view else "结果图"
+        self.statusBar().showMessage(f"{label}已切换为 1:1。", 2500)
+
+    def toggle_image_focus(self) -> None:
+        current = self._focused_image_view()
+        target = self.result_view if current is self.original_view else self.original_view
+        target.setFocus(QtCore.Qt.FocusReason.ShortcutFocusReason)
+        label = "原图" if target is self.original_view else "结果图"
+        self.statusBar().showMessage(f"当前图片焦点：{label}", 2500)
+
+    def zoom_current_image(self, zoom_in: bool) -> None:
+        view = self._focused_image_view()
+        changed = view.zoom_in() if zoom_in else view.zoom_out()
+        if changed:
+            label = "原图" if view is self.original_view else "结果图"
+            self.statusBar().showMessage(
+                f"已{'放大' if zoom_in else '缩小'}{label}。", 1500
+            )
+
+    def cancel_shortcut_context(self) -> None:
+        focus = QtWidgets.QApplication.focusWidget()
+        if focus is not None and (
+            isinstance(focus, (QtWidgets.QLineEdit, QtWidgets.QPlainTextEdit, QtWidgets.QTextEdit))
+            or isinstance(focus, QtWidgets.QAbstractSpinBox)
+            or (isinstance(focus, QtWidgets.QComboBox) and focus.isEditable())
+        ):
+            focus.clearFocus()
+            self.queue_list.setFocus(QtCore.Qt.FocusReason.ShortcutFocusReason)
+            self.statusBar().showMessage("已退出输入状态。", 2500)
+            return
+        self.statusBar().showMessage("当前没有需要取消的输入操作。", 2500)
 
     def choose_root(self) -> None:
         initial = str(self.root_path or Path.home())

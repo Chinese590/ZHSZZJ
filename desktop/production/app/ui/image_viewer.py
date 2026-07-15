@@ -36,6 +36,7 @@ class ZoomableImageView(QtWidgets.QGraphicsView):
             | QtGui.QPainter.RenderHint.SmoothPixmapTransform
         )
         self.setMinimumSize(320, 300)
+        self.setFocusPolicy(QtCore.Qt.FocusPolicy.StrongFocus)
         self._has_image = False
         self._scale_value = 1.0
         self._fit_mode = True
@@ -128,18 +129,30 @@ class ZoomableImageView(QtWidgets.QGraphicsView):
         self._scale_value = 1.0
         self.zoom_changed.emit(self._scale_value)
 
+    def zoom_by(self, factor: float) -> bool:
+        if not self._has_image or factor <= 0:
+            return False
+        current = self.transform().m11()
+        next_value = current * factor
+        if not 0.03 <= next_value <= 30:
+            return False
+        self._fit_mode = False
+        self.scale(factor, factor)
+        self._scale_value = next_value
+        self.zoom_changed.emit(next_value)
+        return True
+
+    def zoom_in(self) -> bool:
+        return self.zoom_by(1.25)
+
+    def zoom_out(self) -> bool:
+        return self.zoom_by(0.8)
+
     def wheelEvent(self, event: QtGui.QWheelEvent) -> None:
         if not self._has_image:
             super().wheelEvent(event)
             return
-        current = self.transform().m11()
-        factor = 1.25 if event.angleDelta().y() > 0 else 0.8
-        next_value = current * factor
-        if 0.03 <= next_value <= 30:
-            self._fit_mode = False
-            self.scale(factor, factor)
-            self._scale_value = next_value
-            self.zoom_changed.emit(next_value)
+        self.zoom_by(1.25 if event.angleDelta().y() > 0 else 0.8)
         event.accept()
 
     def mouseDoubleClickEvent(self, event: QtGui.QMouseEvent) -> None:

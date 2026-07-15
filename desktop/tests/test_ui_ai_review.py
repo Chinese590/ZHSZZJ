@@ -58,8 +58,8 @@ def build_window(tmp_path: Path):
 def test_main_window_contains_ai_consistency_panel(tmp_path: Path):
     app, window = build_window(tmp_path)
 
-    assert window.ai_review_panel.local_button.text() == "本地AI检测"
-    assert window.ai_review_panel.online_button.text() == "在线深度复核"
+    assert window.ai_review_panel.local_button.text().startswith("本地AI检测")
+    assert window.ai_review_panel.online_button.text().startswith("在线深度复核")
     assert window.ai_review_panel.isEnabled()
     window.close()
 
