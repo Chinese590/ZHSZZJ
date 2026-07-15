@@ -7,7 +7,7 @@ from pathlib import Path
 from .models import DataGroup
 
 STATUS_FOLDERS = ("质检完成", "待返修", "待质检", "返修提交")
-QUEUE_FOLDERS = ("待质检", "待返修")
+QUEUE_FOLDERS = ("待质检", "返修提交")
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".jfif", ".png", ".bmp", ".webp", ".tif", ".tiff", ".gif"}
 
 

@@ -29,16 +29,17 @@ def test_scan_status_recognizes_files_and_missing_items(tmp_path: Path):
     assert set(by_name["000002"].missing) == {"结果图", "英文指令"}
 
 
-def test_scan_queue_only_reads_pending_and_rework(tmp_path: Path):
+def test_scan_queue_reads_pending_and_repair_submissions_only(tmp_path: Path):
     for status in ("质检完成", "待返修", "待质检", "返修提交"):
         make_group(tmp_path, status, "王五", status, True)
 
     groups = scan_queue(tmp_path)
 
-    assert {(g.status, g.group_name) for g in groups} == {
+    assert [(g.status, g.group_name) for g in groups] == [
         ("待质检", "待质检"),
-        ("待返修", "待返修"),
-    }
+        ("返修提交", "返修提交"),
+    ]
+    assert all(group.status in {"待质检", "返修提交"} for group in groups)
 
 
 def test_scan_all_counts_counts_groups_per_person_and_status(tmp_path: Path):

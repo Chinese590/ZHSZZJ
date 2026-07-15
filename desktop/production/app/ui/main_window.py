@@ -168,7 +168,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.queue_list.setAlternatingRowColors(True)
         self.queue_list.currentRowChanged.connect(self.display_group)
         queue_layout.addWidget(self.queue_list, 1)
-        queue_hint = QtWidgets.QLabel("队列来源：待质检 + 待返修\n红色项目表示文件不完整")
+        queue_hint = QtWidgets.QLabel("队列来源：仅待质检\n待返修只显示数量，不进入质检队列\n红色项目表示文件不完整")
         queue_hint.setObjectName("hintLabel")
         queue_layout.addWidget(queue_hint)
         main_splitter.addWidget(queue_panel)
@@ -607,7 +607,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.queue_list.clear()
         selected_row = -1
         for index, group in enumerate(groups):
-            status_tag = "初检" if group.status == "待质检" else "返修复检"
+            status_tag = "待质检"
             missing_text = f"  缺少：{'、'.join(group.missing)}" if group.missing else ""
             item = QtWidgets.QListWidgetItem(
                 f"[{status_tag}] {group.person}\n{group.group_name}{missing_text}"
