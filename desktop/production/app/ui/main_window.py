@@ -168,7 +168,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.queue_list.setAlternatingRowColors(True)
         self.queue_list.currentRowChanged.connect(self.display_group)
         queue_layout.addWidget(self.queue_list, 1)
-        queue_hint = QtWidgets.QLabel("队列来源：仅待质检\n待返修只显示数量，不进入质检队列\n红色项目表示文件不完整")
+        queue_hint = QtWidgets.QLabel("队列来源：待质检 + 返修提交\n待返修只显示数量，不进入质检队列\n红色项目表示文件不完整")
         queue_hint.setObjectName("hintLabel")
         queue_layout.addWidget(queue_hint)
         main_splitter.addWidget(queue_panel)

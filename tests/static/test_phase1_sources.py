@@ -178,8 +178,8 @@ def test_production_app_package_is_used_and_queue_matches_latest_requirement():
     scanner = read(ROOT / "desktop" / "production" / "app" / "scanner.py")
     window = read(ROOT / "desktop" / "production" / "app" / "ui" / "main_window.py")
     assert '"desktop\\production"' in build_script
-    assert 'QUEUE_FOLDERS = ("待质检", "待返修")' in scanner
-    assert "队列来源：待质检 + 待返修" in window
+    assert 'QUEUE_FOLDERS = ("待质检", "返修提交")' in scanner
+    assert "队列来源：待质检 + 返修提交" in window
 
 
 def test_release_workflow_runs_full_desktop_test_suite_with_packaged_runtime():
