@@ -44,6 +44,7 @@ public sealed class ResumableDownloadService : IResumableDownloadService
     private readonly ReleaseUrlPolicy _urlPolicy;
     private readonly int _maxRetries;
     private readonly TimeSpan[] _retryDelays = { TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(3), TimeSpan.FromSeconds(8) };
+    private static readonly TimeSpan ReadIdleTimeout = TimeSpan.FromSeconds(90);
 
     public ResumableDownloadService(HttpClient httpClient, ReleaseUrlPolicy urlPolicy, int maxRetries = 3)
     {
@@ -78,7 +79,7 @@ public sealed class ResumableDownloadService : IResumableDownloadService
                 TryDelete(request.FinalPath);
                 throw;
             }
-            catch (Exception ex) when (ex is HttpRequestException or IOException)
+            catch (Exception ex) when (ex is HttpRequestException or IOException or TimeoutException)
             {
                 lastError = ex;
                 if (attempt + 1 >= _maxRetries)
@@ -95,45 +96,60 @@ public sealed class ResumableDownloadService : IResumableDownloadService
     private async Task DownloadAttemptAsync(DownloadRequest request, string partPath, IProgress<DownloadProgress>? progress, CancellationToken cancellationToken)
     {
         var existingBytes = File.Exists(partPath) ? new FileInfo(partPath).Length : 0;
-        using var message = new HttpRequestMessage(HttpMethod.Get, request.Uri);
-        if (existingBytes > 0)
+        HttpResponseMessage? response = null;
+        while (response is null)
         {
-            message.Headers.Range = new RangeHeaderValue(existingBytes, null);
-        }
-
-        using var response = await _httpClient.SendAsync(message, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-        if (existingBytes > 0 && response.StatusCode != HttpStatusCode.PartialContent)
-        {
-            response.Dispose();
-            File.Delete(partPath);
-            await DownloadAttemptAsync(request, partPath, progress, cancellationToken);
-            return;
-        }
-
-        response.EnsureSuccessStatusCode();
-        var responseLength = response.Content.Headers.ContentLength ?? Math.Max(0, request.ExpectedSize - existingBytes);
-        var totalBytes = existingBytes + responseLength;
-        await using var input = await response.Content.ReadAsStreamAsync(cancellationToken);
-        await using var output = new FileStream(partPath, existingBytes > 0 ? FileMode.Append : FileMode.Create, FileAccess.Write, FileShare.None, 1024 * 128, useAsync: true);
-        var buffer = new byte[1024 * 128];
-        var downloaded = existingBytes;
-        var started = System.Diagnostics.Stopwatch.StartNew();
-
-        while (true)
-        {
-            var read = await input.ReadAsync(buffer, cancellationToken);
-            if (read == 0)
+            using var message = new HttpRequestMessage(HttpMethod.Get, request.Uri);
+            if (existingBytes > 0)
             {
-                break;
+                message.Headers.Range = new RangeHeaderValue(existingBytes, null);
             }
-            await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
-            downloaded += read;
+
+            response = await _httpClient.SendAsync(message, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            if (existingBytes > 0 && response.StatusCode != HttpStatusCode.PartialContent)
+            {
+                response.Dispose();
+                response = null;
+                File.Delete(partPath);
+                existingBytes = 0;
+            }
+        }
+
+        using (response)
+        {
+            response.EnsureSuccessStatusCode();
+            var responseLength = response.Content.Headers.ContentLength ?? Math.Max(0, request.ExpectedSize - existingBytes);
+            var totalBytes = existingBytes + responseLength;
+            await using var input = await response.Content.ReadAsStreamAsync(cancellationToken);
+            await using var output = new FileStream(partPath, existingBytes > 0 ? FileMode.Append : FileMode.Create, FileAccess.Write, FileShare.None, 1024 * 128, useAsync: true);
+            var buffer = new byte[1024 * 128];
+            var downloaded = existingBytes;
+            var started = System.Diagnostics.Stopwatch.StartNew();
+            var lastProgressReport = TimeSpan.Zero;
+
+            while (true)
+            {
+                var read = await input.ReadAsync(buffer, cancellationToken).AsTask().WaitAsync(ReadIdleTimeout, cancellationToken);
+                if (read == 0)
+                {
+                    break;
+                }
+                await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
+                downloaded += read;
+                if (started.Elapsed - lastProgressReport >= TimeSpan.FromMilliseconds(250))
+                {
+                    lastProgressReport = started.Elapsed;
+                    var seconds = Math.Max(0.001, started.Elapsed.TotalSeconds);
+                    progress?.Report(new DownloadProgress(downloaded, totalBytes, (downloaded - existingBytes) / seconds));
+                }
+            }
+            // Always emit the final byte count, even for a small or very fast download.
             var seconds = Math.Max(0.001, started.Elapsed.TotalSeconds);
             progress?.Report(new DownloadProgress(downloaded, totalBytes, (downloaded - existingBytes) / seconds));
-        }
 
-        await output.FlushAsync(cancellationToken);
-        output.Flush(flushToDisk: true);
+            await output.FlushAsync(cancellationToken);
+            output.Flush(flushToDisk: true);
+        }
     }
 
     private static async Task VerifyAsync(string partPath, DownloadRequest request, CancellationToken cancellationToken)

@@ -139,7 +139,7 @@ public sealed class StartupCoordinator
             {
                 runtimeZip = Path.Combine(layout.Downloads, $"runtime-{manifest.Runtime.Version}.zip");
                 var runtimeProgress = new Progress<DownloadProgress>(p =>
-                    _progress.Report(new StartupProgress(StartupStage.DownloadingRuntime, "下载运行库……", p.Percent, p.BytesPerSecond)));
+                    _progress.Report(new StartupProgress(StartupStage.DownloadingRuntime, "下载运行库（支持断点续传，请勿关闭）……", p.Percent, p.BytesPerSecond)));
                 await _downloadService.DownloadAsync(
                     new DownloadRequest(manifest.Runtime.Uri, runtimeZip, manifest.Runtime.Sha256, manifest.Runtime.Size),
                     runtimeProgress,

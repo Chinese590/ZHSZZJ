@@ -40,4 +40,26 @@ public sealed class ResumableDownloadServiceTests
         Assert.False(File.Exists(finalPath));
         Assert.False(File.Exists(finalPath + ".part"));
     }
+
+    [Fact]
+    public async Task Download_restarts_once_when_server_ignores_range_request()
+    {
+        using var temp = new TempDirectory();
+        var full = new byte[] { 1, 2, 3, 4 };
+        var finalPath = temp.Combine("runtime.zip");
+        await File.WriteAllBytesAsync(finalPath + ".part", new byte[] { 1, 2 });
+        var requests = 0;
+        var handler = new RecordingHttpHandler(_ =>
+        {
+            requests++;
+            return RecordingHttpHandler.Bytes(full, HttpStatusCode.OK);
+        });
+        var service = new ResumableDownloadService(new HttpClient(handler), new ReleaseUrlPolicy("https://github.com/example/repo/releases/download/"), maxRetries: 1);
+        var request = new DownloadRequest(new Uri("https://github.com/example/repo/releases/download/v1/runtime.zip"), finalPath, Convert.ToHexString(SHA256.HashData(full)).ToLowerInvariant(), full.LongLength);
+
+        await service.DownloadAsync(request, null, CancellationToken.None);
+
+        Assert.Equal(2, requests);
+        Assert.Equal(full, await File.ReadAllBytesAsync(finalPath));
+    }
 }
