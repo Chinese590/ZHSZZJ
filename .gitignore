@@ -9,4 +9,6 @@ __pycache__/
 build/
 artifacts/
 *.zip
+!dataguard/
+!dataguard/dataguard-source.zip
 *.tgz

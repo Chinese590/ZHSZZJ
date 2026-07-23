@@ -4,11 +4,11 @@ from pathlib import Path
 
 from PySide6 import QtCore, QtGui, QtWidgets
 
-from ..image_loader import ImageLoadError, load_image_for_display
+from ..image_loader import ImageLoadError, LoadedImage, load_image_for_display
 
 
 class ZoomableImageView(QtWidgets.QGraphicsView):
-    """Image viewer with robust decoding, automatic fit, zoom and drag pan."""
+    """Image viewer with cached fit preview and explicit full-resolution 1:1."""
 
     zoom_changed = QtCore.Signal(float)
     image_info_changed = QtCore.Signal(int, int, str)
@@ -43,6 +43,8 @@ class ZoomableImageView(QtWidgets.QGraphicsView):
         self._image_dimensions = (0, 0)
         self._image_format = ""
         self._refit_pending = False
+        self._source_path: Path | None = None
+        self._full_resolution_loaded = False
         self._center_placeholder()
 
     @property
@@ -61,6 +63,10 @@ class ZoomableImageView(QtWidgets.QGraphicsView):
     def image_format(self) -> str:
         return self._image_format
 
+    @property
+    def full_resolution_loaded(self) -> bool:
+        return self._full_resolution_loaded
+
     def clear_image(self, message: str = "未加载图片") -> None:
         self._pixmap_item.setPixmap(QtGui.QPixmap())
         self._placeholder.setText(message)
@@ -69,12 +75,36 @@ class ZoomableImageView(QtWidgets.QGraphicsView):
         self._fit_mode = True
         self._image_dimensions = (0, 0)
         self._image_format = ""
+        self._source_path = None
+        self._full_resolution_loaded = False
         self.resetTransform()
         self._scale_value = 1.0
         self._scene.setSceneRect(QtCore.QRectF())
         self._center_placeholder()
         self.zoom_changed.emit(self._scale_value)
         self.image_info_changed.emit(0, 0, "")
+
+    def _preview_size(self) -> tuple[int, int]:
+        viewport = self.viewport().size()
+        return (
+            min(2560, max(1024, viewport.width() * 2)),
+            min(2560, max(1024, viewport.height() * 2)),
+        )
+
+    def _apply_loaded(self, loaded: LoadedImage, *, full_resolution: bool) -> bool:
+        pixmap = QtGui.QPixmap.fromImage(loaded.image)
+        if pixmap.isNull():
+            self.clear_image("图片已解码，但无法创建显示画面")
+            return False
+        self._pixmap_item.setPixmap(pixmap)
+        self._placeholder.hide()
+        self._scene.setSceneRect(QtCore.QRectF(pixmap.rect()))
+        self._has_image = True
+        self._full_resolution_loaded = full_resolution
+        self._image_dimensions = (loaded.width, loaded.height)
+        self._image_format = loaded.file_format
+        self.image_info_changed.emit(loaded.width, loaded.height, loaded.file_format)
+        return True
 
     def load_image(self, path: Path | str | None) -> bool:
         if path is None:
@@ -84,31 +114,31 @@ class ZoomableImageView(QtWidgets.QGraphicsView):
         if not image_path.is_file():
             self.clear_image("图片文件不存在")
             return False
-
         try:
-            loaded = load_image_for_display(image_path)
+            loaded = load_image_for_display(image_path, max_size=self._preview_size())
         except ImageLoadError as exc:
             self.clear_image(f"无法读取图片\n{exc}")
             return False
 
-        pixmap = QtGui.QPixmap.fromImage(loaded.image)
-        if pixmap.isNull():
-            self.clear_image("图片已解码，但无法创建显示画面")
+        self._source_path = image_path
+        if not self._apply_loaded(loaded, full_resolution=False):
             return False
-
-        self._pixmap_item.setPixmap(pixmap)
-        self._placeholder.hide()
-        self._scene.setSceneRect(QtCore.QRectF(pixmap.rect()))
-        self._has_image = True
         self._fit_mode = True
-        self._image_dimensions = (loaded.width, loaded.height)
-        self._image_format = loaded.file_format
-        self.image_info_changed.emit(loaded.width, loaded.height, loaded.file_format)
         self.fit_to_view()
-        # A second fit after layout completion avoids a tiny/blank first render
-        # when the view has not yet received its final splitter size.
         self._schedule_refit()
         return True
+
+    def _ensure_full_resolution(self) -> bool:
+        if self._full_resolution_loaded:
+            return True
+        if self._source_path is None:
+            return False
+        try:
+            loaded = load_image_for_display(self._source_path)
+        except ImageLoadError as exc:
+            self.clear_image(f"无法读取完整图片\n{exc}")
+            return False
+        return self._apply_loaded(loaded, full_resolution=True)
 
     def fit_to_view(self) -> None:
         if not self._has_image:
@@ -121,7 +151,7 @@ class ZoomableImageView(QtWidgets.QGraphicsView):
         self.zoom_changed.emit(self._scale_value)
 
     def actual_size(self) -> None:
-        if not self._has_image:
+        if not self._has_image or not self._ensure_full_resolution():
             return
         self._fit_mode = False
         self.resetTransform()

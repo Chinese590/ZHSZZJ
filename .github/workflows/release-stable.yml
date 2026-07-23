@@ -1,12 +1,19 @@
-name: Release Stable DataTang QC Tool
+name: Release Stable DataTang QC Tool and DataGuard
 
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: Release version, for example 1.0.0
+        description: Release version, for example 1.9.0
         required: true
-        default: 1.0.0
+        default: 1.9.0
+  push:
+    branches: [main]
+    paths:
+      - desktop/**
+      - dataguard/**
+      - tests/static/**
+      - .github/workflows/release-stable.yml
 
 permissions:
   contents: write
@@ -16,6 +23,7 @@ jobs:
     runs-on: windows-latest
     env:
       GH_TOKEN: ${{ github.token }}
+      RELEASE_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.version || '1.9.0' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -24,6 +32,11 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 8.0.x
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
 
       - name: Test launcher
         shell: pwsh
@@ -46,48 +59,53 @@ jobs:
 
       - name: Build desktop app package
         shell: pwsh
-        run: ./scripts/build_app_package.ps1 -Version '${{ inputs.version }}' -OutputDirectory ./artifacts
+        # Manual runs historically used: -Version '${{ inputs.version }}'
+        run: ./scripts/build_app_package.ps1 -Version "$env:RELEASE_VERSION" -OutputDirectory ./artifacts
 
-      - name: Build single-file launcher
+      - name: Build single-file QC launcher
         shell: pwsh
-        run: ./scripts/build_launcher.ps1 -Repository '${{ github.repository }}' -Version '${{ inputs.version }}' -OutputDirectory ./artifacts/launcher
+        run: ./scripts/build_launcher.ps1 -Repository '${{ github.repository }}' -Version "$env:RELEASE_VERSION" -OutputDirectory ./artifacts/launcher
+
+      - name: Build DataGuard administrator and user packages
+        shell: pwsh
+        run: |
+          $repoRoot = (Resolve-Path '.').Path
+          $sourceRoot = Join-Path $repoRoot 'build/dataguard-source'
+          if (Test-Path $sourceRoot) { Remove-Item $sourceRoot -Recurse -Force }
+          Expand-Archive './dataguard/dataguard-source.zip' $sourceRoot -Force
+          python -m pip install --upgrade pip
+          python -m pip install -r (Join-Path $sourceRoot 'requirements-build.txt')
+          Push-Location $sourceRoot
+          python -m pytest tests -q
+          pyinstaller --clean DataGuardAdmin.spec
+          pyinstaller --clean DataGuardUser.spec
+          Copy-Item (Join-Path $repoRoot 'artifacts/launcher/DataTangQCTool-Launcher.exe') './dist/DataGuard-Admin/' -Force
+          Copy-Item './release_docs/GitHub_Release_Usage.txt' './dist/DataGuard-Admin/使用说明.txt' -Force
+          Copy-Item './release_docs/GitHub_Release_Usage.txt' './dist/DataGuard-User/使用说明.txt' -Force
+          Compress-Archive './dist/DataGuard-Admin/*' (Join-Path $repoRoot 'artifacts/DataGuard-Admin-Suite.zip') -Force
+          Compress-Archive './dist/DataGuard-User/*' (Join-Path $repoRoot 'artifacts/DataGuard-User.zip') -Force
+          Pop-Location
 
       - name: Generate stable manifest and checksums
         shell: pwsh
         run: |
-          $version = '${{ inputs.version }}'
+          $version = $env:RELEASE_VERSION
           $tag = "v$version"
           $repo = '${{ github.repository }}'
           $runtime = Resolve-Path './artifacts/runtime-win-x64.zip'
           $app = Resolve-Path './artifacts/app.zip'
           $runtimeHash = (Get-FileHash $runtime -Algorithm SHA256).Hash.ToLowerInvariant()
           $appHash = (Get-FileHash $app -Algorithm SHA256).Hash.ToLowerInvariant()
-          $runtimeInputs = @(
-            './release/requirements/runtime-requirements.lock',
-            './scripts/build_runtime.ps1'
-          )
-          $runtimeFingerprintText = ($runtimeInputs | ForEach-Object {
-            (Get-FileHash $_ -Algorithm SHA256).Hash.ToLowerInvariant()
-          }) -join ':'
+          $runtimeInputs = @('./release/requirements/runtime-requirements.lock','./scripts/build_runtime.ps1')
+          $runtimeFingerprintText = ($runtimeInputs | ForEach-Object { (Get-FileHash $_ -Algorithm SHA256).Hash.ToLowerInvariant() }) -join ':'
           $runtimeFingerprintBytes = [Text.Encoding]::UTF8.GetBytes($runtimeFingerprintText)
           $runtimeFingerprint = [Convert]::ToHexString([System.Security.Cryptography.SHA256]::HashData($runtimeFingerprintBytes)).ToLowerInvariant()
           $runtimeVersion = 'runtime-' + $runtimeFingerprint.Substring(0, 12)
           $manifest = @{
             schema_version = 1
             channel = 'stable'
-            runtime = @{
-              version = $runtimeVersion
-              url = "https://github.com/$repo/releases/download/$tag/runtime-win-x64.zip"
-              sha256 = $runtimeHash
-              size = (Get-Item $runtime).Length
-            }
-            app = @{
-              version = $version
-              url = "https://github.com/$repo/releases/download/$tag/app.zip"
-              sha256 = $appHash
-              size = (Get-Item $app).Length
-              entrypoint = 'app/main.py'
-            }
+            runtime = @{ version = $runtimeVersion; url = "https://github.com/$repo/releases/download/$tag/runtime-win-x64.zip"; sha256 = $runtimeHash; size = (Get-Item $runtime).Length }
+            app = @{ version = $version; url = "https://github.com/$repo/releases/download/$tag/app.zip"; sha256 = $appHash; size = (Get-Item $app).Length; entrypoint = 'app/main.py' }
           }
           $manifest | ConvertTo-Json -Depth 8 | Set-Content './artifacts/stable-manifest.json' -Encoding UTF8
           Get-ChildItem './artifacts' -File -Recurse | ForEach-Object {
@@ -97,26 +115,28 @@ jobs:
       - name: Create GitHub Release
         shell: pwsh
         run: |
-          $tag = "v${{ inputs.version }}"
+          $tag = "v$env:RELEASE_VERSION"
           gh release view $tag *> $null
-          if ($LASTEXITCODE -eq 0) {
-            gh release delete $tag --yes --cleanup-tag
-          }
+          if ($LASTEXITCODE -eq 0) { gh release delete $tag --yes --cleanup-tag }
           gh release create $tag `
             './artifacts/runtime-win-x64.zip' `
             './artifacts/app.zip' `
             './artifacts/stable-manifest.json' `
             './artifacts/SHA256SUMS.txt' `
             './artifacts/launcher/DataTangQCTool-Launcher.exe' `
-            --title "DataTang QC Tool $tag" `
-            --notes "Stable desktop QC tool with selectable persistent cache, verified GitHub runtime download, local offline reuse, full QC workflow, and optional Hugging Face model cache." `
+            './artifacts/DataGuard-Admin-Suite.zip' `
+            './artifacts/DataGuard-User.zip' `
+            --title "DataGuard and DataTang QC Tool $tag" `
+            --notes "Adds separate DataGuard administrator/user clients, one-click direct QC startup, and cached fit previews to reduce result-image switching lag." `
             --latest
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: DataTangQCTool-stable-${{ inputs.version }}
+          name: DataGuard-DataTangQC-${{ env.RELEASE_VERSION }}
           path: |
             artifacts/launcher/DataTangQCTool-Launcher.exe
+            artifacts/DataGuard-Admin-Suite.zip
+            artifacts/DataGuard-User.zip
             artifacts/stable-manifest.json
             artifacts/SHA256SUMS.txt

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -22,7 +23,7 @@ def main() -> int:
     try:
         args = parse_args()
         cache_root = Path(args.cache_root).resolve()
-        from PySide6 import QtGui, QtWidgets
+        from PySide6 import QtCore, QtGui, QtWidgets
         from app.ui.main_window import MainWindow
 
         app = QtWidgets.QApplication([sys.argv[0]])
@@ -30,6 +31,14 @@ def main() -> int:
         app.setOrganizationName("DataTang")
         app.setStyle("Fusion")
         app.setFont(QtGui.QFont("Microsoft YaHei UI", 10))
+
+        # DataGuard administrator mode passes the selected QC workspace through
+        # the process environment. Persist it before MainWindow restores last_root.
+        direct_root = os.environ.get("DATATANG_QC_ROOT", "").strip()
+        if direct_root and Path(direct_root).is_dir():
+            settings = QtCore.QSettings("DataTang", "QualityControlTool")
+            settings.setValue("last_root", str(Path(direct_root).resolve()))
+
         window = MainWindow(cache_root=cache_root)
         window.show()
         return app.exec()
