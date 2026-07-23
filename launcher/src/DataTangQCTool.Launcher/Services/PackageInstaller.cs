@@ -9,6 +9,9 @@ public interface IPackageInstaller
 
 public sealed class PackageInstaller : IPackageInstaller
 {
+    private const int MaxEntryCount = 10_000;
+    private const long MaxUncompressedBytes = 2L * 1024 * 1024 * 1024;
+
     public async Task InstallPackageAsync(string zipPath, string targetDirectory, IReadOnlyCollection<string> expectedRelativeFiles, CancellationToken cancellationToken)
     {
         if (!File.Exists(zipPath))
@@ -24,6 +27,11 @@ public sealed class PackageInstaller : IPackageInstaller
         try
         {
             using var archive = ZipFile.OpenRead(zipPath);
+            if (archive.Entries.Count > MaxEntryCount)
+            {
+                throw new InvalidDataException("安装包文件数量超过安全上限。");
+            }
+            long totalUncompressedBytes = 0;
             foreach (var entry in archive.Entries)
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -43,6 +51,12 @@ public sealed class PackageInstaller : IPackageInstaller
                 {
                     Directory.CreateDirectory(destination);
                     continue;
+                }
+
+                totalUncompressedBytes = checked(totalUncompressedBytes + entry.Length);
+                if (totalUncompressedBytes > MaxUncompressedBytes)
+                {
+                    throw new InvalidDataException("安装包解压后大小超过安全上限。");
                 }
 
                 Directory.CreateDirectory(Path.GetDirectoryName(destination)!);

@@ -25,4 +25,20 @@ public sealed class ReleaseManifestTests
         var manifest = TestManifests.Valid();
         Assert.Throws<InvalidDataException>(() => manifest.ValidateReleasePrefix(new Uri("https://github.com/owner/other/releases/download/")));
     }
+
+    [Theory]
+    [InlineData("../outside")]
+    [InlineData("runtime/next")]
+    public void Parse_rejects_unsafe_version(string version)
+    {
+        var json = TestManifests.Valid().ToJson().Replace("\"version\": \"1.0.0\"", $"\"version\": \"{version}\"", StringComparison.Ordinal);
+        Assert.Throws<InvalidDataException>(() => ReleaseManifest.Parse(json));
+    }
+
+    [Fact]
+    public void Parse_rejects_entrypoint_outside_app_package()
+    {
+        var json = TestManifests.Valid().ToJson().Replace("app/main.py", "../outside.py", StringComparison.Ordinal);
+        Assert.Throws<InvalidDataException>(() => ReleaseManifest.Parse(json));
+    }
 }

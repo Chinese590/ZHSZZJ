@@ -79,9 +79,9 @@ public sealed class ReleaseManifest
 
     private static void ValidateAsset(ReleaseAsset asset, string name, bool requiresEntrypoint)
     {
-        if (string.IsNullOrWhiteSpace(asset.Version))
+        if (!IsSafeVersionSegment(asset.Version))
         {
-            throw new InvalidDataException($"{name} 缺少 version。");
+            throw new InvalidDataException($"{name} version 必须是单个安全目录名。");
         }
 
         if (!Uri.TryCreate(asset.Url, UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttps)
@@ -109,10 +109,25 @@ public sealed class ReleaseManifest
             throw new InvalidDataException($"{name} 文件大小必须大于 0。");
         }
 
-        if (requiresEntrypoint && string.IsNullOrWhiteSpace(asset.Entrypoint))
+        if (requiresEntrypoint && !IsSafeRelativePath(asset.Entrypoint))
         {
-            throw new InvalidDataException("app 缺少 entrypoint。");
+            throw new InvalidDataException("app entrypoint 必须是安全的相对路径。");
         }
+    }
+
+    private static bool IsSafeVersionSegment(string? value)
+    {
+        return !string.IsNullOrWhiteSpace(value)
+            && value.IndexOfAny(Path.GetInvalidFileNameChars()) < 0
+            && value.IndexOfAny([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar]) < 0
+            && value is not "." and not "..";
+    }
+
+    private static bool IsSafeRelativePath(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value) || Path.IsPathRooted(value)) return false;
+        var segments = value.Replace('\\', '/').Split('/', StringSplitOptions.RemoveEmptyEntries);
+        return segments.Length > 0 && segments.All(segment => segment is not "." and not "..");
     }
 }
 
