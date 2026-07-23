@@ -144,8 +144,8 @@ public sealed class ResumableDownloadService : IResumableDownloadService
                 }
             }
             // Always emit the final byte count, even for a small or very fast download.
-            var seconds = Math.Max(0.001, started.Elapsed.TotalSeconds);
-            progress?.Report(new DownloadProgress(downloaded, totalBytes, (downloaded - existingBytes) / seconds));
+            var finalSeconds = Math.Max(0.001, started.Elapsed.TotalSeconds);
+            progress?.Report(new DownloadProgress(downloaded, totalBytes, (downloaded - existingBytes) / finalSeconds));
 
             await output.FlushAsync(cancellationToken);
             output.Flush(flushToDisk: true);
