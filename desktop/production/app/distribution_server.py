@@ -8,6 +8,7 @@ import ipaddress
 import json
 from pathlib import Path
 import secrets
+import argparse
 from typing import Any
 
 from .distribution import DistributionService
@@ -111,3 +112,14 @@ class DistributionRequestHandler(BaseHTTPRequestHandler):
 
 def serve(project_root: Path, host: str = "127.0.0.1", port: int = 8765) -> DistributionHttpServer:
     return DistributionHttpServer((validate_bind_host(host), port), DistributionService(project_root))
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="局域网图片分发中心")
+    parser.add_argument("--project", required=True)
+    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--port", type=int, default=8765)
+    args = parser.parse_args()
+    server = serve(Path(args.project), args.host, args.port)
+    print(f"图片分发中心已启动：http://{args.host}:{args.port}")
+    server.serve_forever()

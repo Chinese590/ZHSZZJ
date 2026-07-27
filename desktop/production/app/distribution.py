@@ -11,6 +11,8 @@ import secrets
 import shutil
 import tempfile
 import threading
+import time
+from contextlib import contextmanager
 from typing import Any
 
 from PIL import Image
@@ -97,6 +99,7 @@ class DistributionService:
         self.audit_path = self.root / "audit.jsonl"
         self.successful_images_path = self.root / "successful-images.jsonl"
         self.uploads_dir = self.root / "uploads"
+        self.lock_path = self.root / "project.lock"
         self._lock = threading.RLock()
         self.tasks_dir.mkdir(parents=True, exist_ok=True)
         self.library_dir.mkdir(parents=True, exist_ok=True)
@@ -107,7 +110,7 @@ class DistributionService:
         source = Path(source).resolve()
         if not source.is_dir():
             raise ValueError(f"图片目录不存在: {source}")
-        with self._lock:
+        with self._lock, self._project_lock():
             existing = self._known_hashes()
             perceptual_hashes = [(task.task_id, task.perceptual_hash) for task in self._tasks()]
             imported: list[Task] = []
@@ -191,7 +194,7 @@ class DistributionService:
     def distribute(self, member_ids: list[str], per_member: int) -> list[Assignment]:
         if per_member < 1 or not member_ids or len(set(member_ids)) != len(member_ids):
             raise ValueError("分发人数或数量无效")
-        with self._lock:
+        with self._lock, self._project_lock():
             members = self._read_json(self.members_path)
             active = {item.get("member_id") for item in members if isinstance(item, dict) and item.get("active")} if isinstance(members, list) else set()
             if any(member_id not in active for member_id in member_ids):
@@ -224,6 +227,12 @@ class DistributionService:
             upload_dir = self.uploads_dir / task.task_id
             stored = upload_dir / f"result{result_image.suffix.lower()}"
             self._copy_file_atomic(result_image, stored)
+            queue = self.project_root / "质检项目" / "待质检" / str(member_id) / task.task_id
+            queue.mkdir(parents=True, exist_ok=True)
+            source = (self.project_root / task.source_path).resolve()
+            shutil.copy2(source, queue / task.image_name)
+            shutil.copy2(stored, queue / stored.name)
+            (queue / "distribution-task.json").write_text(json.dumps({"task_id": task.task_id, "member_id": member_id, "source_sha256": task.sha256}, ensure_ascii=False), encoding="utf-8")
             updated = replace(task, state="UPLOADED_PENDING_QC")
             self._write_json_atomic(self._task_path(task.task_id), updated.to_dict())
             self._append_audit("UPLOAD", task_id=task.task_id, member_id=member_id, sha256=self._sha256(stored))
@@ -250,6 +259,30 @@ class DistributionService:
             self._write_json_atomic(self._task_path(task.task_id), updated.to_dict())
             self._append_audit(action, task_id=task.task_id, member_id=member_id)
             return updated
+
+    @contextmanager
+    def _project_lock(self):
+        self.root.mkdir(parents=True, exist_ok=True)
+        deadline = time.monotonic() + 30
+        while True:
+            try:
+                fd = os.open(self.lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                os.write(fd, str(os.getpid()).encode("ascii")); os.close(fd)
+                break
+            except FileExistsError:
+                try:
+                    if time.time() - self.lock_path.stat().st_mtime > 120:
+                        self.lock_path.unlink(missing_ok=True)
+                        continue
+                except FileNotFoundError:
+                    continue
+                if time.monotonic() >= deadline:
+                    raise TimeoutError("项目正在被另一台管理端占用")
+                time.sleep(0.05)
+        try:
+            yield
+        finally:
+            self.lock_path.unlink(missing_ok=True)
 
     def task(self, task_id: str) -> Task:
         payload = self._read_json(self._task_path(task_id))

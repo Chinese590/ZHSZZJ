@@ -6,15 +6,7 @@ on:
       version:
         description: Release version, for example 1.9.0
         required: true
-        default: 1.9.0
-  push:
-    branches: [main]
-    paths:
-      - desktop/**
-      - dataguard/**
-      - tests/static/**
-      - .github/workflows/release-stable.yml
-
+        default: 1.9.3
 permissions:
   contents: write
 
@@ -23,7 +15,7 @@ jobs:
     runs-on: windows-latest
     env:
       GH_TOKEN: ${{ github.token }}
-      RELEASE_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.version || '1.9.0' }}
+      RELEASE_VERSION: ${{ inputs.version }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -80,6 +72,24 @@ jobs:
         shell: pwsh
         run: ./scripts/build_launcher.ps1 -Repository '${{ github.repository }}' -Version "$env:RELEASE_VERSION" -OutputDirectory ./artifacts/launcher
 
+      - name: Build portable LAN distribution server package
+        shell: pwsh
+        run: |
+          $root = Join-Path (Resolve-Path '.') 'build/image-distribution-server'
+          Remove-Item $root -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item (Join-Path $root 'runtime') -ItemType Directory -Force | Out-Null
+          Expand-Archive './artifacts/runtime-win-x64.zip' (Join-Path $root 'runtime') -Force
+          Expand-Archive './artifacts/app.zip' $root -Force
+          @'
+          @echo off
+          set "PROJECT=%~1"
+          if "%PROJECT%"=="" set /p "PROJECT=Project root: "
+          set "HOST=%~2"
+          if "%HOST%"=="" set "HOST=127.0.0.1"
+          runtime\python.exe -c "import sys; sys.path.insert(0,'.'); from app.distribution_server import serve; s=serve(r'%PROJECT%', r'%HOST%', 8765); print('LAN server started on port 8765'); s.serve_forever()"
+          '@ | Set-Content (Join-Path $root 'Start-ImageDistribution.bat') -Encoding ASCII
+          Compress-Archive (Join-Path $root '*') './artifacts/ImageDistribution-Server.zip' -Force
+
       - name: Build DataGuard administrator and user packages
         shell: pwsh
         run: |
@@ -91,8 +101,11 @@ jobs:
           python -m pip install -r (Join-Path $sourceRoot 'requirements-build.txt')
           Push-Location $sourceRoot
           python -m pytest tests -q
+          if ($LASTEXITCODE -ne 0) { throw "DataGuard tests failed" }
           pyinstaller --clean DataGuardAdmin.spec
+          if ($LASTEXITCODE -ne 0) { throw "DataGuard admin build failed" }
           pyinstaller --clean DataGuardUser.spec
+          if ($LASTEXITCODE -ne 0) { throw "DataGuard user build failed" }
           Copy-Item (Join-Path $repoRoot 'artifacts/launcher/DataTangQCTool-Launcher.exe') './dist/DataGuard-Admin/' -Force
           Copy-Item './release_docs/GitHub_Release_Usage.txt' './dist/DataGuard-Admin/使用说明.txt' -Force
           Copy-Item './release_docs/GitHub_Release_Usage.txt' './dist/DataGuard-User/使用说明.txt' -Force
@@ -123,7 +136,9 @@ jobs:
           }
           $manifest | ConvertTo-Json -Depth 8 | Set-Content './artifacts/stable-manifest.json' -Encoding UTF8
           Get-ChildItem './artifacts' -File -Recurse | ForEach-Object {
-            "{0}  {1}" -f ((Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()), ($_.FullName.Substring((Resolve-Path './artifacts').Path.Length + 1).Replace('\','/'))
+            $relative = $_.FullName.Substring((Resolve-Path './artifacts').Path.Length + 1).Replace('\','/')
+            if ($relative.StartsWith('launcher/')) { $relative = $relative.Substring(9) }
+            "{0}  {1}" -f ((Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()), $relative
           } | Set-Content './artifacts/SHA256SUMS.txt' -Encoding ASCII
 
       - name: Create GitHub Release
@@ -131,7 +146,7 @@ jobs:
         run: |
           $tag = "v$env:RELEASE_VERSION"
           gh release view $tag *> $null
-          if ($LASTEXITCODE -eq 0) { gh release delete $tag --yes --cleanup-tag }
+          if ($LASTEXITCODE -eq 0) { throw "Release already exists; choose a new version." }
           gh release create $tag `
             './artifacts/runtime-win-x64.zip' `
             './artifacts/app.zip' `
@@ -140,6 +155,7 @@ jobs:
             './artifacts/launcher/DataTangQCTool-Launcher.exe' `
             './artifacts/DataGuard-Admin-Suite.zip' `
             './artifacts/DataGuard-User.zip' `
+            './artifacts/ImageDistribution-Server.zip' `
             --title "DataGuard and DataTang QC Tool $tag" `
             --notes "Adds separate DataGuard administrator/user clients, one-click direct QC startup, and cached fit previews to reduce result-image switching lag." `
             --latest
@@ -154,3 +170,4 @@ jobs:
             artifacts/DataGuard-User.zip
             artifacts/stable-manifest.json
             artifacts/SHA256SUMS.txt
+
