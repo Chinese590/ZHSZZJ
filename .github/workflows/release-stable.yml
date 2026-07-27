@@ -46,6 +46,20 @@ jobs:
         shell: pwsh
         run: ./scripts/build_runtime.ps1 -OutputDirectory ./artifacts
 
+      - name: Verify runtime package entry count
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $runtime = Resolve-Path './artifacts/runtime-win-x64.zip'
+          $archive = [System.IO.Compression.ZipFile]::OpenRead($runtime)
+          try {
+            if ($archive.Entries.Count -gt 20000) { throw "Runtime package contains $($archive.Entries.Count) entries; maximum is 20000." }
+            Write-Host "Runtime package entry count: $($archive.Entries.Count)"
+          }
+          finally {
+            $archive.Dispose()
+          }
+
       - name: Test desktop application with packaged runtime
         shell: pwsh
         run: |
