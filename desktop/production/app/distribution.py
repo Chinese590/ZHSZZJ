@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime
 import hashlib
 import json
 import os
@@ -20,7 +20,6 @@ from PIL import Image
 
 _IMAGE_EXTENSIONS = {".bmp", ".jpeg", ".jpg", ".png", ".tif", ".tiff", ".webp"}
 _TASK_ID_PATTERN = re.compile(r"[A-Za-z0-9_-]{22}")
-_BUSINESS_TIMEZONE = timezone(timedelta(hours=8), name="Asia/Shanghai")
 
 
 class DistributionIntegrityError(RuntimeError):
@@ -451,5 +450,7 @@ class DistributionService:
 
     @staticmethod
     def _now() -> str:
-        return datetime.now(_BUSINESS_TIMEZONE).isoformat()
+        # Use the server's local timezone so daily reports match the operator's
+        # calendar (and remain deterministic in deployments configured for UTC).
+        return datetime.now().astimezone().isoformat()
 
