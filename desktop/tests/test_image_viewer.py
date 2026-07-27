@@ -9,6 +9,17 @@ from PySide6 import QtWidgets
 from app.ui.image_viewer import ZoomableImageView
 
 
+def test_preview_size_uses_physical_pixels_and_not_legacy_2560_cap(monkeypatch):
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    view = ZoomableImageView()
+    view.resize(3000, 1800)
+    view.show()
+    app.processEvents()
+    monkeypatch.setattr(view, "devicePixelRatioF", lambda: 2.0)
+    assert view._preview_size() == (4096, 3600)
+    view.close()
+
+
 def test_viewer_reports_pixels_and_refits_when_resized(tmp_path: Path):
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
     path = tmp_path / "wide.jpg"

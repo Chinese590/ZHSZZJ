@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from math import ceil
 from pathlib import Path
 
 from PySide6 import QtCore, QtGui, QtWidgets
@@ -87,8 +88,8 @@ class ZoomableImageView(QtWidgets.QGraphicsView):
     def _preview_size(self) -> tuple[int, int]:
         viewport = self.viewport().size()
         return (
-            min(2560, max(1024, viewport.width() * 2)),
-            min(2560, max(1024, viewport.height() * 2)),
+            min(4096, max(1024, ceil(viewport.width() * self.devicePixelRatioF()))),
+            min(4096, max(1024, ceil(viewport.height() * self.devicePixelRatioF()))),
         )
 
     def _apply_loaded(self, loaded: LoadedImage, *, full_resolution: bool) -> bool:
