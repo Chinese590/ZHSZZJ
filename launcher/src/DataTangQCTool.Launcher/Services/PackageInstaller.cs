@@ -9,7 +9,7 @@ public interface IPackageInstaller
 
 public sealed class PackageInstaller : IPackageInstaller
 {
-    private const int MaxEntryCount = 10_000;
+    private const int MaxEntryCount = 20_000;
     private const long MaxUncompressedBytes = 2L * 1024 * 1024 * 1024;
 
     public async Task InstallPackageAsync(string zipPath, string targetDirectory, IReadOnlyCollection<string> expectedRelativeFiles, CancellationToken cancellationToken)

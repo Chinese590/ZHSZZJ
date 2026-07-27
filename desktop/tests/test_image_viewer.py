@@ -1,4 +1,5 @@
 import os
+from math import ceil
 from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -7,6 +8,35 @@ from PIL import Image
 from PySide6 import QtWidgets
 
 from app.ui.image_viewer import ZoomableImageView
+
+
+def test_preview_size_uses_physical_pixels_and_not_legacy_2560_cap(monkeypatch):
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    view = ZoomableImageView()
+    view.resize(3000, 1800)
+    view.show()
+    app.processEvents()
+    monkeypatch.setattr(view, "devicePixelRatioF", lambda: 2.0)
+    assert view._preview_size() == (4096, 3600)
+    view.close()
+
+
+def test_preview_size_uses_non_integer_dpr_and_clamps_each_edge(monkeypatch):
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    view = ZoomableImageView()
+    view.resize(1800, 900)
+    view.show()
+    app.processEvents()
+    monkeypatch.setattr(view, "devicePixelRatioF", lambda: 1.5)
+    viewport = view.viewport().size()
+    assert view._preview_size() == (
+        min(4096, max(1024, ceil(viewport.width() * 1.5))),
+        min(4096, max(1024, ceil(viewport.height() * 1.5))),
+    )
+    view.resize(5000, 320)
+    app.processEvents()
+    assert view._preview_size() == (4096, 1024)
+    view.close()
 
 
 def test_viewer_reports_pixels_and_refits_when_resized(tmp_path: Path):

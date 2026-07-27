@@ -39,13 +39,30 @@ public sealed class PackageInstallerTests
     }
 
     [Fact]
-    public async Task Install_rejects_archive_with_too_many_entries()
+    public async Task Install_accepts_archive_with_20k_entries()
+    {
+        using var temp = new TempDirectory();
+        var zip = temp.Combine("20k-files.zip");
+        using (var archive = ZipFile.Open(zip, ZipArchiveMode.Create))
+        {
+            for (var index = 0; index < 20_000; index++)
+            {
+                archive.CreateEntry($"files/{index}.txt");
+            }
+        }
+        var installer = new PackageInstaller();
+
+        await installer.InstallPackageAsync(zip, temp.Combine("target"), Array.Empty<string>(), CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task Install_rejects_archive_above_20k_entries()
     {
         using var temp = new TempDirectory();
         var zip = temp.Combine("too-many-files.zip");
         using (var archive = ZipFile.Open(zip, ZipArchiveMode.Create))
         {
-            for (var index = 0; index <= 10_000; index++)
+            for (var index = 0; index <= 20_000; index++)
             {
                 archive.CreateEntry($"files/{index}.txt");
             }
