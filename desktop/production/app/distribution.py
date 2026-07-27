@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timedelta, timezone
 import hashlib
 import json
@@ -96,6 +96,7 @@ class DistributionService:
         self.members_path = self.root / "members.json"
         self.audit_path = self.root / "audit.jsonl"
         self.successful_images_path = self.root / "successful-images.jsonl"
+        self.uploads_dir = self.root / "uploads"
         self._lock = threading.RLock()
         self.tasks_dir.mkdir(parents=True, exist_ok=True)
         self.library_dir.mkdir(parents=True, exist_ok=True)
@@ -157,6 +158,88 @@ class DistributionService:
 
     def my_tasks(self, member_id: str) -> list[Task]:
         return [task for task in self._tasks() if task.member_id == member_id]
+
+    def create_member(self, member_id: str, display_name: str, password: str = "") -> None:
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", member_id):
+            raise ValueError("成员 ID 只能包含字母、数字、下划线和连字符")
+        with self._lock:
+            members = self._read_json(self.members_path)
+            if not isinstance(members, list):
+                raise DistributionIntegrityError("成员文件损坏")
+            if any(item.get("member_id") == member_id for item in members if isinstance(item, dict)):
+                raise ValueError("成员已存在")
+            password_salt = secrets.token_hex(16)
+            members.append({"member_id": member_id, "display_name": display_name, "active": True, "password_salt": password_salt, "password_hash": self._password_hash(password, password_salt)})
+            self._write_json_atomic(self.members_path, members)
+            self._append_audit("MEMBER_CREATE", member_id=member_id)
+
+    def authenticate(self, member_id: str, password: str) -> bool:
+        members = self._read_json(self.members_path)
+        if not isinstance(members, list):
+            raise DistributionIntegrityError("成员文件损坏")
+        for item in members:
+            if isinstance(item, dict) and item.get("member_id") == member_id and item.get("active"):
+                return secrets.compare_digest(str(item.get("password_hash", "")), self._password_hash(password, str(item.get("password_salt", ""))))
+        return False
+
+    def distribute(self, member_ids: list[str], per_member: int) -> list[Assignment]:
+        if per_member < 1 or not member_ids or len(set(member_ids)) != len(member_ids):
+            raise ValueError("分发人数或数量无效")
+        with self._lock:
+            available = [task for task in self._tasks() if task.state == "AVAILABLE"]
+            needed = len(member_ids) * per_member
+            if len(available) < needed:
+                raise ValueError(f"可分发图片不足：需要 {needed}，当前 {len(available)}")
+            selected = secrets.SystemRandom().sample(available, needed)
+            assignments: list[Assignment] = []
+            for index, task in enumerate(selected):
+                member_id = member_ids[index % len(member_ids)]
+                assigned = replace(task, state="ASSIGNED", member_id=member_id)
+                self._write_json_atomic(self._task_path(task.task_id), assigned.to_dict())
+                self._append_audit("DISTRIBUTE", task_id=task.task_id, member_id=member_id)
+                assignments.append(Assignment(task.task_id, member_id))
+            return assignments
+
+    def start(self, task_id: str, member_id: str) -> Task:
+        return self._transition(task_id, member_id, ("ASSIGNED",), "IN_PROGRESS", "START")
+
+    def upload(self, task_id: str, member_id: str, result_image: Path) -> Task:
+        result_image = Path(result_image)
+        if not result_image.is_file() or result_image.suffix.lower() not in _IMAGE_EXTENSIONS:
+            raise ValueError("上传文件不是支持的图片")
+        with self._lock:
+            task = self.task(task_id)
+            if task.member_id != member_id or task.state not in {"ASSIGNED", "IN_PROGRESS"}:
+                raise PermissionError("任务不可上传")
+            upload_dir = self.uploads_dir / task.task_id
+            stored = upload_dir / f"result{result_image.suffix.lower()}"
+            self._copy_file_atomic(result_image, stored)
+            updated = replace(task, state="UPLOADED_PENDING_QC")
+            self._write_json_atomic(self._task_path(task.task_id), updated.to_dict())
+            self._append_audit("UPLOAD", task_id=task.task_id, member_id=member_id, sha256=self._sha256(stored))
+            return updated
+
+    def recall(self, task_id: str, actor: str, reason: str) -> Task:
+        if not reason.strip():
+            raise ValueError("召回必须填写原因")
+        with self._lock:
+            task = self.task(task_id)
+            if task.state not in {"ASSIGNED", "IN_PROGRESS"}:
+                raise ValueError("仅未上传任务可以召回")
+            updated = replace(task, state="AVAILABLE", member_id=None)
+            self._write_json_atomic(self._task_path(task.task_id), updated.to_dict())
+            self._append_audit("RECALL", task_id=task.task_id, actor=actor, reason=reason)
+            return updated
+
+    def _transition(self, task_id: str, member_id: str, allowed: tuple[str, ...], target: str, action: str) -> Task:
+        with self._lock:
+            task = self.task(task_id)
+            if task.member_id != member_id or task.state not in allowed:
+                raise PermissionError("任务状态或归属不匹配")
+            updated = replace(task, state=target)
+            self._write_json_atomic(self._task_path(task.task_id), updated.to_dict())
+            self._append_audit(action, task_id=task.task_id, member_id=member_id)
+            return updated
 
     def task(self, task_id: str) -> Task:
         payload = self._read_json(self._task_path(task_id))
@@ -226,6 +309,11 @@ class DistributionService:
     @staticmethod
     def _hamming_distance(left: str, right: str) -> int:
         return (int(left, 16) ^ int(right, 16)).bit_count()
+
+    @staticmethod
+    def _password_hash(password: str, salt: str = "") -> str:
+        raw_salt = bytes.fromhex(salt) if salt else b"DataTangDistribution-v1"
+        return hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), raw_salt, 310_000).hex()
 
     @staticmethod
     def _read_json(path: Path) -> Any:

@@ -82,3 +82,31 @@ def test_task_id_and_corrupt_state_fail_closed(tmp_path):
     source = make_image_folder(tmp_path, {"valid.jpg": (3000, 3000)})
     with pytest.raises(RuntimeError, match="损坏"):
         service.import_images(source)
+
+
+def test_distribution_upload_and_recall_follow_owner_and_state(tmp_path):
+    service = DistributionService(tmp_path)
+    service.create_member("a", "成员A")
+    service.create_member("b", "成员B")
+    source = make_image_folder(tmp_path, {"1.jpg": (3000, 3000), "2.jpg": (3000, 3000)})
+    Image.new("RGB", (3000, 3000), "#993333").save(source / "2.jpg")
+    service.import_images(source)
+    assignments = service.distribute(["a", "b"], 1)
+    owned = next(item for item in assignments if item.member_id == "a")
+    with pytest.raises(PermissionError):
+        service.start(owned.task_id, "b")
+    assert service.start(owned.task_id, "a").state == "IN_PROGRESS"
+    assert service.recall(owned.task_id, "admin", "下班召回").state == "AVAILABLE"
+    replacement = service.distribute(["a"], 1)[0]
+    assert service.upload(replacement.task_id, "a", source / "1.jpg").state == "UPLOADED_PENDING_QC"
+    with pytest.raises(ValueError):
+        service.recall(replacement.task_id, "admin", "不能召回已上传")
+
+
+def test_member_password_is_hashed_and_can_authenticate(tmp_path):
+    service = DistributionService(tmp_path)
+    service.create_member("member", "成员", "correct-password")
+    raw = (tmp_path / ".图片分发中心" / "members.json").read_text(encoding="utf-8")
+    assert "correct-password" not in raw
+    assert service.authenticate("member", "correct-password")
+    assert not service.authenticate("member", "wrong-password")
