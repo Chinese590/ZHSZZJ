@@ -15,7 +15,7 @@ from .distribution import DistributionService
 
 def validate_bind_host(host: str) -> str:
     address = ipaddress.ip_address(host)
-    if not (address.is_loopback or address.is_private):
+    if address.is_unspecified or address.is_multicast or address.is_link_local or address.is_reserved or not (address.is_loopback or address.is_private):
         raise ValueError("服务只能绑定本机或局域网私有地址")
     return str(address)
 
@@ -80,13 +80,13 @@ class DistributionRequestHandler(BaseHTTPRequestHandler):
                 finally:
                     temporary.unlink(missing_ok=True)
                 self._json(HTTPStatus.OK, task.to_dict()); return
-            if self.path == "/api/admin/import" and member == "admin":
+            if self.path == "/api/admin/import" and self.server.service.is_admin(member):
                 result = self.server.service.import_images(Path(str(body["source"])))
                 self._json(HTTPStatus.OK, {"imported": result.imported, "duplicates": result.exact_duplicates, "warnings": result.warnings}); return
-            if self.path == "/api/admin/distribute" and member == "admin":
+            if self.path == "/api/admin/distribute" and self.server.service.is_admin(member):
                 assignments = self.server.service.distribute([str(item) for item in body["member_ids"]], int(body["per_member"]))
                 self._json(HTTPStatus.OK, {"assignments": [{"task_id": item.task_id, "member_id": item.member_id} for item in assignments]}); return
-            if self.path == "/api/admin/recall" and member == "admin":
+            if self.path == "/api/admin/recall" and self.server.service.is_admin(member):
                 task = self.server.service.recall(str(body["task_id"]), member, str(body["reason"]))
                 self._json(HTTPStatus.OK, task.to_dict()); return
             self._json(HTTPStatus.FORBIDDEN, {"error": "无权执行此操作"})

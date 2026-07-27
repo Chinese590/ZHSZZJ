@@ -159,9 +159,11 @@ class DistributionService:
     def my_tasks(self, member_id: str) -> list[Task]:
         return [task for task in self._tasks() if task.member_id == member_id]
 
-    def create_member(self, member_id: str, display_name: str, password: str = "") -> None:
+    def create_member(self, member_id: str, display_name: str, password: str = "", role: str = "member") -> None:
         if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", member_id):
             raise ValueError("成员 ID 只能包含字母、数字、下划线和连字符")
+        if len(password) < 8 or role not in {"member", "admin"}:
+            raise ValueError("密码至少 8 位且角色无效")
         with self._lock:
             members = self._read_json(self.members_path)
             if not isinstance(members, list):
@@ -169,7 +171,7 @@ class DistributionService:
             if any(item.get("member_id") == member_id for item in members if isinstance(item, dict)):
                 raise ValueError("成员已存在")
             password_salt = secrets.token_hex(16)
-            members.append({"member_id": member_id, "display_name": display_name, "active": True, "password_salt": password_salt, "password_hash": self._password_hash(password, password_salt)})
+            members.append({"member_id": member_id, "display_name": display_name, "active": True, "role": role, "password_salt": password_salt, "password_hash": self._password_hash(password, password_salt)})
             self._write_json_atomic(self.members_path, members)
             self._append_audit("MEMBER_CREATE", member_id=member_id)
 
@@ -182,10 +184,18 @@ class DistributionService:
                 return secrets.compare_digest(str(item.get("password_hash", "")), self._password_hash(password, str(item.get("password_salt", ""))))
         return False
 
+    def is_admin(self, member_id: str) -> bool:
+        members = self._read_json(self.members_path)
+        return isinstance(members, list) and any(isinstance(item, dict) and item.get("member_id") == member_id and item.get("active") and item.get("role") == "admin" for item in members)
+
     def distribute(self, member_ids: list[str], per_member: int) -> list[Assignment]:
         if per_member < 1 or not member_ids or len(set(member_ids)) != len(member_ids):
             raise ValueError("分发人数或数量无效")
         with self._lock:
+            members = self._read_json(self.members_path)
+            active = {item.get("member_id") for item in members if isinstance(item, dict) and item.get("active")} if isinstance(members, list) else set()
+            if any(member_id not in active for member_id in member_ids):
+                raise ValueError("包含不存在或已停用成员")
             available = [task for task in self._tasks() if task.state == "AVAILABLE"]
             needed = len(member_ids) * per_member
             if len(available) < needed:

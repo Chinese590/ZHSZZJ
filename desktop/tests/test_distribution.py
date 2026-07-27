@@ -86,8 +86,8 @@ def test_task_id_and_corrupt_state_fail_closed(tmp_path):
 
 def test_distribution_upload_and_recall_follow_owner_and_state(tmp_path):
     service = DistributionService(tmp_path)
-    service.create_member("a", "成员A")
-    service.create_member("b", "成员B")
+    service.create_member("a", "成员A", "password-a")
+    service.create_member("b", "成员B", "password-b")
     source = make_image_folder(tmp_path, {"1.jpg": (3000, 3000), "2.jpg": (3000, 3000)})
     Image.new("RGB", (3000, 3000), "#993333").save(source / "2.jpg")
     service.import_images(source)
