@@ -191,7 +191,7 @@ def _decode(path: Path, max_size: tuple[int, int] | None) -> LoadedImage:
         raise ImageLoadError(detail) from qt_exc
 
 
-@lru_cache(maxsize=24)
+@lru_cache(maxsize=8)
 def _load_preview_cached(
     path_text: str,
     modified_ns: int,

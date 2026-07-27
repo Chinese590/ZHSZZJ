@@ -3,6 +3,7 @@ from __future__ import annotations
 from http import HTTPStatus
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import base64
 import ipaddress
 import json
 from pathlib import Path
@@ -66,6 +67,25 @@ class DistributionRequestHandler(BaseHTTPRequestHandler):
             if self.path == "/api/tasks/start":
                 task = self.server.service.start(str(body["task_id"]), member)
                 self._json(HTTPStatus.OK, task.to_dict()); return
+            if self.path == "/api/tasks/upload":
+                if not body.get("task_id") or not body.get("filename") or not body.get("content_base64"):
+                    raise ValueError("上传字段不完整")
+                suffix = Path(str(body["filename"])).suffix.lower()
+                if suffix not in {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tif", ".tiff"}:
+                    raise ValueError("不支持的图片格式")
+                temporary = self.server.service.root / f"upload-{secrets.token_urlsafe(8)}{suffix}"
+                temporary.write_bytes(base64.b64decode(str(body["content_base64"]), validate=True))
+                try:
+                    task = self.server.service.upload(str(body["task_id"]), member, temporary)
+                finally:
+                    temporary.unlink(missing_ok=True)
+                self._json(HTTPStatus.OK, task.to_dict()); return
+            if self.path == "/api/admin/import" and member == "admin":
+                result = self.server.service.import_images(Path(str(body["source"])))
+                self._json(HTTPStatus.OK, {"imported": result.imported, "duplicates": result.exact_duplicates, "warnings": result.warnings}); return
+            if self.path == "/api/admin/distribute" and member == "admin":
+                assignments = self.server.service.distribute([str(item) for item in body["member_ids"]], int(body["per_member"]))
+                self._json(HTTPStatus.OK, {"assignments": [{"task_id": item.task_id, "member_id": item.member_id} for item in assignments]}); return
             if self.path == "/api/admin/recall" and member == "admin":
                 task = self.server.service.recall(str(body["task_id"]), member, str(body["reason"]))
                 self._json(HTTPStatus.OK, task.to_dict()); return
@@ -77,7 +97,11 @@ class DistributionRequestHandler(BaseHTTPRequestHandler):
         member = self._member()
         if self.path == "/":
             self.send_response(HTTPStatus.OK); self.send_header("Content-Type", "text/html; charset=utf-8"); self.end_headers()
-            self.wfile.write("<h1>图片分发中心</h1><p>请使用局域网客户端登录。</p>".encode("utf-8")); return
+            self.wfile.write("""<!doctype html><meta charset='utf-8'><title>图片分发中心</title>
+            <h1>图片分发中心</h1><label>成员ID <input id='member'></label><label>密码 <input id='password' type='password'></label>
+            <button onclick='login()'>登录</button><button onclick='tasks()'>我的任务</button><pre id='out'></pre>
+            <script>async function login(){let r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({member_id:member.value,password:password.value})});out.textContent=await r.text()}
+            async function tasks(){let r=await fetch('/api/my/tasks');out.textContent=await r.text()}</script>""".encode("utf-8")); return
         if not member:
             self._json(HTTPStatus.UNAUTHORIZED, {"error": "请先登录"}); return
         if self.path == "/api/my/tasks":

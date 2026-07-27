@@ -209,6 +209,12 @@ class ZoomableImageView(QtWidgets.QGraphicsView):
     def _run_scheduled_refit(self) -> None:
         self._refit_pending = False
         if self._has_image and self._fit_mode:
+            if self._source_path is not None:
+                current = self._pixmap_item.pixmap().size()
+                target = self._preview_size()
+                if current.width() < min(target[0], 4096) * 0.8 or current.height() < min(target[1], 4096) * 0.8:
+                    self.load_image(self._source_path)
+                    return
             self.fit_to_view()
 
     def _center_placeholder(self) -> None:
