@@ -163,20 +163,48 @@ class DistributionService:
         return [task for task in self._tasks() if task.member_id == member_id]
 
     def create_member(self, member_id: str, display_name: str, password: str = "", role: str = "member") -> None:
-        if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", member_id):
-            raise ValueError("成员 ID 只能包含字母、数字、下划线和连字符")
-        if len(password) < 8 or role not in {"member", "admin"}:
-            raise ValueError("密码至少 8 位且角色无效")
+        self.create_members([{"member_id": member_id, "display_name": display_name, "password": password, "role": role}])
+
+    def initialize_admin(self, member_id: str, display_name: str, password: str) -> None:
         with self._lock:
-            members = self._read_json(self.members_path)
-            if not isinstance(members, list):
-                raise DistributionIntegrityError("成员文件损坏")
-            if any(item.get("member_id") == member_id for item in members if isinstance(item, dict)):
+            members = self._members()
+            if any(item.get("active") and item.get("role") == "admin" for item in members):
+                raise ValueError("管理员已初始化")
+            self._create_members(members, [{"member_id": member_id, "display_name": display_name, "password": password, "role": "admin"}])
+
+    def create_members(self, new_members: list[dict[str, Any]]) -> None:
+        with self._lock:
+            self._create_members(self._members(), new_members)
+
+    def _members(self) -> list[dict[str, Any]]:
+        members = self._read_json(self.members_path)
+        if not isinstance(members, list) or not all(isinstance(item, dict) for item in members):
+            raise DistributionIntegrityError("成员文件损坏")
+        return members
+
+    def _create_members(self, members: list[dict[str, Any]], new_members: list[dict[str, Any]]) -> None:
+        if not new_members:
+            raise ValueError("至少添加一名成员")
+        existing_ids = {str(item.get("member_id", "")) for item in members}
+        prepared: list[dict[str, Any]] = []
+        for item in new_members:
+            member_id = str(item.get("member_id", "")).strip()
+            display_name = str(item.get("display_name", "")).strip()
+            password = str(item.get("password", ""))
+            role = str(item.get("role", "member"))
+            if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", member_id):
+                raise ValueError("成员 ID 只能包含字母、数字、下划线和连字符")
+            if not display_name or len(password) < 8 or role not in {"member", "admin"}:
+                raise ValueError("姓名不能为空，密码至少 8 位且角色无效")
+            if member_id in existing_ids:
                 raise ValueError("成员已存在")
             password_salt = secrets.token_hex(16)
-            members.append({"member_id": member_id, "display_name": display_name, "active": True, "role": role, "password_salt": password_salt, "password_hash": self._password_hash(password, password_salt)})
-            self._write_json_atomic(self.members_path, members)
-            self._append_audit("MEMBER_CREATE", member_id=member_id)
+            prepared.append({"member_id": member_id, "display_name": display_name, "active": True, "role": role, "password_salt": password_salt, "password_hash": self._password_hash(password, password_salt)})
+            existing_ids.add(member_id)
+        members.extend(prepared)
+        self._write_json_atomic(self.members_path, members)
+        for item in prepared:
+            self._append_audit("MEMBER_CREATE", member_id=item["member_id"], role=item["role"])
 
     def authenticate(self, member_id: str, password: str) -> bool:
         members = self._read_json(self.members_path)
@@ -303,6 +331,22 @@ class DistributionService:
             if isinstance(record, dict) and str(record.get("timestamp", "")).startswith(prefix):
                 report.append(record)
         return report
+
+    def daily_summary(self, day: date) -> dict[str, Any]:
+        records = self.daily_report(day)
+        actions: dict[str, int] = {}
+        members: dict[str, dict[str, int]] = {}
+        for record in records:
+            action = str(record.get("action", "UNKNOWN"))
+            actions[action] = actions.get(action, 0) + 1
+            member_id = record.get("member_id")
+            if member_id and action in {"DISTRIBUTE", "START", "UPLOAD"}:
+                stats = members.setdefault(str(member_id), {"distributed": 0, "started": 0, "uploaded": 0})
+                stats[{"DISTRIBUTE": "distributed", "START": "started", "UPLOAD": "uploaded"}[action]] += 1
+        states: dict[str, int] = {}
+        for task in self._tasks():
+            states[task.state] = states.get(task.state, 0) + 1
+        return {"day": day.isoformat(), "events": len(records), "actions": actions, "task_states": states, "members": members}
 
     def _tasks(self) -> list[Task]:
         tasks: list[Task] = []

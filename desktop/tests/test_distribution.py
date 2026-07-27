@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import shutil
+from datetime import date
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -110,3 +111,37 @@ def test_member_password_is_hashed_and_can_authenticate(tmp_path):
     assert "correct-password" not in raw
     assert service.authenticate("member", "correct-password")
     assert not service.authenticate("member", "wrong-password")
+
+
+def test_initialize_admin_and_bulk_members_are_hashed_and_audited(tmp_path):
+    service = DistributionService(tmp_path)
+
+    service.initialize_admin("admin", "管理员", "admin-password")
+    service.create_members([
+        {"member_id": "a", "display_name": "成员 A", "password": "password-a", "role": "member"},
+        {"member_id": "b", "display_name": "成员 B", "password": "password-b", "role": "member"},
+    ])
+
+    raw = (tmp_path / ".图片分发中心" / "members.json").read_text(encoding="utf-8")
+    assert "admin-password" not in raw and "password-a" not in raw
+    assert service.is_admin("admin") and service.authenticate("b", "password-b")
+    with pytest.raises(ValueError, match="已初始化"):
+        service.initialize_admin("other", "其他", "other-password")
+    records = service.daily_report(date.today())
+    assert [record["action"] for record in records] == ["MEMBER_CREATE"] * 3
+    assert {record["role"] for record in records} == {"admin", "member"}
+
+
+def test_daily_summary_counts_member_workflow_events(tmp_path):
+    service = DistributionService(tmp_path)
+    service.create_member("a", "成员A", "password-a")
+    source = make_image_folder(tmp_path, {"1.jpg": (3000, 3000)})
+    task = service.import_images(source).tasks[0]
+    service.distribute(["a"], 1)
+    service.start(task.task_id, "a")
+
+    summary = service.daily_summary(date.today())
+
+    assert summary["actions"]["DISTRIBUTE"] == 1
+    assert summary["members"]["a"] == {"distributed": 1, "started": 1, "uploaded": 0}
+    assert summary["task_states"] == {"IN_PROGRESS": 1}
