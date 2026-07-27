@@ -60,7 +60,7 @@ class DistributionRequestHandler(BaseHTTPRequestHandler):
                 if not self.server.service.authenticate(member, str(body.get("password", ""))):
                     self._json(HTTPStatus.UNAUTHORIZED, {"error": "账号或密码错误"}); return
                 token = secrets.token_urlsafe(32); self.server.sessions[token] = member
-                self._json(HTTPStatus.OK, {"member_id": member}, f"distribution_session={token}; HttpOnly; SameSite=Strict; Path=/")
+                self._json(HTTPStatus.OK, {"member_id": member, "admin": self.server.service.is_admin(member)}, f"distribution_session={token}; HttpOnly; SameSite=Strict; Path=/")
                 return
             member = self._member()
             if not member:
@@ -98,11 +98,16 @@ class DistributionRequestHandler(BaseHTTPRequestHandler):
         member = self._member()
         if self.path == "/":
             self.send_response(HTTPStatus.OK); self.send_header("Content-Type", "text/html; charset=utf-8"); self.end_headers()
-            self.wfile.write("""<!doctype html><meta charset='utf-8'><title>图片分发中心</title>
-            <h1>图片分发中心</h1><label>成员ID <input id='member'></label><label>密码 <input id='password' type='password'></label>
-            <button onclick='login()'>登录</button><button onclick='tasks()'>我的任务</button><pre id='out'></pre>
-            <script>async function login(){let r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({member_id:member.value,password:password.value})});out.textContent=await r.text()}
-            async function tasks(){let r=await fetch('/api/my/tasks');out.textContent=await r.text()}</script>""".encode("utf-8")); return
+            self.wfile.write("""<!doctype html><meta charset='utf-8'><title>图片分发中心</title><style>body{font:16px Segoe UI;margin:32px;background:#f4f7fb;color:#1d2939}main{max-width:900px;margin:auto;background:white;padding:28px;border-radius:14px}button{margin:4px;padding:8px 14px}input{padding:7px;margin:4px}.card{border:1px solid #d0d5dd;padding:16px;margin-top:18px;border-radius:10px}.hide{display:none}pre{white-space:pre-wrap}</style>
+            <main><h1>图片分发中心</h1><section id='loginCard' class='card'><h2>登录</h2><input id='member' placeholder='成员账号'><input id='password' type='password' placeholder='密码'><button onclick='login()'>登录</button></section>
+            <section id='userCard' class='card hide'><h2>我的任务</h2><button onclick='loadTasks()'>刷新</button><div id='tasks'></div></section>
+            <section id='adminCard' class='card hide'><h2>管理端</h2><p>导入目录：<input id='source' size='45'><button onclick='importImages()'>导入</button></p><p>成员账号（逗号分隔）：<input id='members' value='member-a'><input id='per' type='number' value='1' min='1'><button onclick='distribute()'>开始分发</button></p><pre id='adminOut'></pre></section><pre id='out'></pre></main>
+            <script>const $=id=>document.getElementById(id);async function api(path,body){let r=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});let j=await r.json();if(!r.ok)throw Error(j.error||r.status);return j}
+            async function login(){try{let j=await api('/api/login',{member_id:$('member').value,password:$('password').value});$('loginCard').classList.add('hide');$('userCard').classList.remove('hide');if(j.admin)$('adminCard').classList.remove('hide');loadTasks()}catch(e){$('out').textContent=e}}
+            async function loadTasks(){let r=await fetch('/api/my/tasks');let j=await r.json();$('tasks').innerHTML=j.tasks.map(t=>`<div class='card'><b>${t.image_name}</b>　状态：${t.state}<input type=file onchange='upload("${t.task_id}",this)'></div>`).join('')||'暂无任务'}
+            async function upload(id,input){let f=input.files[0];let b=await new Promise(x=>{let r=new FileReader;r.onload=()=>x(r.result.split(',')[1]);r.readAsDataURL(f)});$('out').textContent=JSON.stringify(await api('/api/tasks/upload',{task_id:id,filename:f.name,content_base64:b}))}
+            async function importImages(){try{$('adminOut').textContent=JSON.stringify(await api('/api/admin/import',{source:$('source').value}))}catch(e){$('adminOut').textContent=e}}
+            async function distribute(){try{$('adminOut').textContent=JSON.stringify(await api('/api/admin/distribute',{member_ids:$('members').value.split(',').map(x=>x.trim()),per_member:Number($('per').value)}))}catch(e){$('adminOut').textContent=e}}</script>""".encode("utf-8")); return
         if not member:
             self._json(HTTPStatus.UNAUTHORIZED, {"error": "请先登录"}); return
         if self.path == "/api/my/tasks":
