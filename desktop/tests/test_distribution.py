@@ -3,7 +3,10 @@ from __future__ import annotations
 import hashlib
 import json
 import shutil
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+
+import pytest
 
 from PIL import Image
 
@@ -58,3 +61,24 @@ def test_import_rejects_hashes_already_recorded_as_successful(tmp_path):
     assert result.imported == 0
     assert result.exact_duplicates == ["done.jpg"]
     assert result.tasks == []
+
+
+def test_concurrent_import_keeps_one_task_for_the_same_source(tmp_path):
+    source = make_image_folder(tmp_path, {"only.jpg": (3000, 3000)})
+    service = DistributionService(tmp_path)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(service.import_images, [source, source]))
+
+    assert sorted(result.imported for result in results) == [0, 1]
+    assert len(list((tmp_path / ".图片分发中心" / "tasks").glob("*.json"))) == 1
+
+
+def test_task_id_and_corrupt_state_fail_closed(tmp_path):
+    service = DistributionService(tmp_path)
+    with pytest.raises(KeyError):
+        service.task("../members")
+    corrupt = tmp_path / ".图片分发中心" / "tasks" / "broken.json"
+    corrupt.write_text("{not-json", encoding="utf-8")
+    source = make_image_folder(tmp_path, {"valid.jpg": (3000, 3000)})
+    with pytest.raises(RuntimeError, match="损坏"):
+        service.import_images(source)
