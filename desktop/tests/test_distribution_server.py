@@ -75,3 +75,28 @@ def test_admin_setup_bulk_member_and_daily_api(tmp_path):
         assert status == 200 and body["actions"]["MEMBER_CREATE"] == 2
     finally:
         server.shutdown(); server.server_close(); thread.join()
+
+
+def test_client_info_endpoint_is_public(tmp_path):
+    server = serve(tmp_path, host="127.0.0.1", port=0)
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        status, body, _ = request(server, "GET", "/api/info")
+        assert status == 200 and body["service"] == "datatang-distribution" and body["protocol"] == 1
+    finally:
+        server.shutdown(); server.server_close(); thread.join()
+
+
+def test_client_can_read_service_info_before_login(tmp_path):
+    server = serve(tmp_path, port=0)
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        status, body, _ = request(server, "GET", "/api/info")
+        assert status == 200
+        assert body["service"] == "datatang-distribution"
+        assert body["protocol"] == 1
+        assert body["port"] == server.server_port
+    finally:
+        server.shutdown(); server.server_close(); thread.join()

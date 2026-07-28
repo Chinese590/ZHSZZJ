@@ -88,6 +88,12 @@ jobs:
           if "%HOST%"=="" set "HOST=0.0.0.0"
           runtime\python.exe -c "import sys,socket; sys.path.insert(0,'.'); from app.distribution_server import serve; s=serve(r'%PROJECT%', r'%HOST%', 8765); print('LAN server started: http://127.0.0.1:8765'); print('Use this computer LAN IP with port 8765, for example http://'+socket.gethostbyname(socket.gethostname())+':8765'); s.serve_forever()"
           '@ | Set-Content (Join-Path $root 'Start-ImageDistribution.bat') -Encoding ASCII
+          Copy-Item './desktop/production/app/distribution_client.py' (Join-Path $root 'distribution_client.py') -Force
+          @'
+          @echo off
+          runtime\python.exe distribution_client.py
+          if errorlevel 1 pause
+          '@ | Set-Content (Join-Path $root 'Start-ImageDistribution-Client.bat') -Encoding ASCII
           Compress-Archive (Join-Path $root '*') './artifacts/ImageDistribution-Server.zip' -Force
 
       - name: Build DataGuard administrator and user packages
