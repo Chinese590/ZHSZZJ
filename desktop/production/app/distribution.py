@@ -165,7 +165,7 @@ class DistributionService:
         self.create_members([{"member_id": member_id, "display_name": display_name, "password": password, "role": role}])
 
     def initialize_admin(self, member_id: str, display_name: str, password: str) -> None:
-        with self._lock:
+        with self._lock, self._project_lock():
             members = self._members()
             if any(item.get("active") and item.get("role") == "admin" for item in members):
                 raise ValueError("管理员已初始化")
