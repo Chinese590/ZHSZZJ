@@ -10,11 +10,13 @@ import json
 from pathlib import Path
 import secrets
 import argparse
+import sys
 from typing import Any
 
 try:
     from .distribution import DistributionService
 except ImportError:  # Allow the portable launcher to execute this file directly.
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
     from distribution import DistributionService
 
 
