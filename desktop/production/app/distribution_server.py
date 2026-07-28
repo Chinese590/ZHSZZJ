@@ -137,9 +137,9 @@ def serve(project_root: Path, host: str = "0.0.0.0", port: int = 8765) -> Distri
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="局域网图片分发中心")
+    parser = argparse.ArgumentParser(description="LAN image distribution server")
     parser.add_argument("--project", required=True)
-    parser.add_argument("--host", default="0.0.0.0", help="绑定地址；默认 0.0.0.0，允许局域网访问")
+    parser.add_argument("--host", default="0.0.0.0", help="bind address; default 0.0.0.0 for LAN access")
     parser.add_argument("--port", type=int, default=8765)
     args = parser.parse_args()
     server = serve(Path(args.project), args.host, args.port)
