@@ -12,7 +12,10 @@ import secrets
 import argparse
 from typing import Any
 
-from .distribution import DistributionService
+try:
+    from .distribution import DistributionService
+except ImportError:  # Allow the portable launcher to execute this file directly.
+    from distribution import DistributionService
 
 
 def validate_bind_host(host: str) -> str:

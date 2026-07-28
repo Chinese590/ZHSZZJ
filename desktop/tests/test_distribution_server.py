@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from http.client import HTTPConnection
 import json
+from pathlib import Path
+import subprocess
+import sys
 from threading import Thread
 
 import pytest
@@ -27,6 +30,18 @@ def test_server_bind_is_limited_to_loopback_or_private_networks():
     assert validate_bind_host("192.168.1.20") == "192.168.1.20"
     with pytest.raises(ValueError):
         validate_bind_host("8.8.8.8")
+
+
+def test_distribution_server_supports_direct_file_launch():
+    script = Path(__file__).parents[1] / "production" / "app" / "distribution_server.py"
+    result = subprocess.run(
+        [sys.executable, str(script), "--help"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0
+    assert "--project" in result.stdout
 
 
 def test_ui_contains_separate_user_and_admin_workflows():
