@@ -94,6 +94,15 @@ jobs:
           runtime\python.exe distribution_client.py
           if errorlevel 1 pause
           '@ | Set-Content (Join-Path $root 'Start-ImageDistribution-Client.bat') -Encoding ASCII
+          Push-Location './desktop/production'
+          & (Resolve-Path '../../build/runtime/runtime-win-x64/python.exe') -m pip install pyinstaller==6.11.1
+          & (Resolve-Path '../../build/runtime/runtime-win-x64/python.exe') -m PyInstaller --clean --onefile --name ImageDistribution-Manager --paths . app/manager_entry.py
+          & (Resolve-Path '../../build/runtime/runtime-win-x64/python.exe') -m PyInstaller --clean --onefile --name ImageDistribution-Client --paths . app/client_entry.py
+          Pop-Location
+          Copy-Item './desktop/production/dist/ImageDistribution-Manager.exe' (Join-Path $root 'ImageDistribution-Manager.exe') -Force
+          Copy-Item './desktop/production/dist/ImageDistribution-Client.exe' (Join-Path $root 'ImageDistribution-Client.exe') -Force
+          Copy-Item './desktop/production/dist/ImageDistribution-Manager.exe' './artifacts/ImageDistribution-Manager.exe' -Force
+          Copy-Item './desktop/production/dist/ImageDistribution-Client.exe' './artifacts/ImageDistribution-Client.exe' -Force
           Compress-Archive (Join-Path $root '*') './artifacts/ImageDistribution-Server.zip' -Force
 
       - name: Build DataGuard administrator and user packages
@@ -162,6 +171,8 @@ jobs:
             './artifacts/DataGuard-Admin-Suite.zip' `
             './artifacts/DataGuard-User.zip' `
             './artifacts/ImageDistribution-Server.zip' `
+            './artifacts/ImageDistribution-Manager.exe' `
+            './artifacts/ImageDistribution-Client.exe' `
             --title "DataGuard and DataTang QC Tool $tag" `
             --notes "Adds separate DataGuard administrator/user clients, one-click direct QC startup, and cached fit previews to reduce result-image switching lag." `
             --latest
