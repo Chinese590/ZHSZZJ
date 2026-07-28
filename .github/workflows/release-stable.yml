@@ -85,8 +85,8 @@ jobs:
           set "PROJECT=%~1"
           if "%PROJECT%"=="" set /p "PROJECT=Project root: "
           set "HOST=%~2"
-          if "%HOST%"=="" set "HOST=127.0.0.1"
-          runtime\python.exe -c "import sys; sys.path.insert(0,'.'); from app.distribution_server import serve; s=serve(r'%PROJECT%', r'%HOST%', 8765); print('LAN server started on port 8765'); s.serve_forever()"
+          if "%HOST%"=="" set "HOST=0.0.0.0"
+          runtime\python.exe -c "import sys,socket; sys.path.insert(0,'.'); from app.distribution_server import serve; s=serve(r'%PROJECT%', r'%HOST%', 8765); print('LAN server started: http://127.0.0.1:8765'); print('Use this computer LAN IP with port 8765, for example http://'+socket.gethostbyname(socket.gethostname())+':8765'); s.serve_forever()"
           '@ | Set-Content (Join-Path $root 'Start-ImageDistribution.bat') -Encoding ASCII
           Compress-Archive (Join-Path $root '*') './artifacts/ImageDistribution-Server.zip' -Force
 

@@ -11,7 +11,8 @@ from app.distribution_server import serve, validate_bind_host
 
 
 def request(server, method: str, path: str, body: dict | None = None, cookie: str = ""):
-    connection = HTTPConnection(*server.server_address)
+    host, port = server.server_address
+    connection = HTTPConnection("127.0.0.1" if host in {"0.0.0.0", "::"} else host, port)
     headers = {"Content-Type": "application/json"} if body is not None else {}
     if cookie:
         headers["Cookie"] = cookie
@@ -21,6 +22,7 @@ def request(server, method: str, path: str, body: dict | None = None, cookie: st
 
 
 def test_server_bind_is_limited_to_loopback_or_private_networks():
+    assert validate_bind_host("0.0.0.0") == "0.0.0.0"
     assert validate_bind_host("127.0.0.1") == "127.0.0.1"
     assert validate_bind_host("192.168.1.20") == "192.168.1.20"
     with pytest.raises(ValueError):
