@@ -5,6 +5,7 @@ import threading
 import webbrowser
 from pathlib import Path
 import sys
+import ctypes
 
 try:
     from .distribution_server import serve
@@ -29,4 +30,7 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as exc:
+        ctypes.windll.user32.MessageBoxW(0, str(exc), "图片分发管理端启动错误", 0x10)
