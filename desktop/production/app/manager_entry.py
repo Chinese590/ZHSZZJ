@@ -4,8 +4,13 @@ from __future__ import annotations
 import threading
 import webbrowser
 from pathlib import Path
+import sys
 
-from .distribution_server import serve
+try:
+    from .distribution_server import serve
+except ImportError:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from distribution_server import serve
 
 
 def main() -> None:
