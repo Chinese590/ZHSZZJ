@@ -113,6 +113,13 @@ def test_member_password_is_hashed_and_can_authenticate(tmp_path):
     assert not service.authenticate("member", "wrong-password")
 
 
+def test_new_member_gets_all_qc_workspace_status_folders(tmp_path):
+    service = DistributionService(tmp_path)
+    service.create_member("member_a", "成员 A", "correct-password")
+    for status in ("待返修", "待质检", "返修提交", "质检完成"):
+        assert (tmp_path / "质检项目" / status / "member_a").is_dir()
+
+
 def test_initialize_admin_and_bulk_members_are_hashed_and_audited(tmp_path):
     service = DistributionService(tmp_path)
 

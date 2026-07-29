@@ -17,7 +17,7 @@ def test_preview_size_uses_physical_pixels_and_not_legacy_2560_cap(monkeypatch):
     view.show()
     app.processEvents()
     monkeypatch.setattr(view, "devicePixelRatioF", lambda: 2.0)
-    assert view._preview_size() == (4096, 3600)
+    assert view._preview_size() == (6000, 3600)
     view.close()
 
 
@@ -30,12 +30,12 @@ def test_preview_size_uses_non_integer_dpr_and_clamps_each_edge(monkeypatch):
     monkeypatch.setattr(view, "devicePixelRatioF", lambda: 1.5)
     viewport = view.viewport().size()
     assert view._preview_size() == (
-        min(4096, max(1024, ceil(viewport.width() * 1.5))),
-        min(4096, max(1024, ceil(viewport.height() * 1.5))),
+        min(8192, max(2048, ceil(viewport.width() * 1.5))),
+        min(8192, max(2048, ceil(viewport.height() * 1.5))),
     )
     view.resize(5000, 320)
     app.processEvents()
-    assert view._preview_size() == (4096, 1024)
+    assert view._preview_size() == (min(8192, max(2048, ceil(view.viewport().width() * 1.5))), 2048)
     view.close()
 
 

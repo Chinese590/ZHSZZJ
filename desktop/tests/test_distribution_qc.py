@@ -23,3 +23,10 @@ def test_qc_pass_sync_registers_successful_image(tmp_path):
     (task_dir / f"{task_id}.json").write_text(json.dumps({"task_id": task_id, "sha256": "abc"}), encoding="utf-8")
     assert sync_qc_result(tmp_path, task_id, {"task_id": task_id, "verdict": "PASS"}) == "QC_PASS"
     assert '"sha256": "abc"' in (tmp_path / ".图片分发中心" / "successful-images.jsonl").read_text(encoding="utf-8")
+
+
+def test_qc_warns_for_missing_image_number(tmp_path):
+    folder = tmp_path / "000123"; folder.mkdir()
+    Image.new("RGB", (2048, 2048)).save(folder / "result.jpg")
+    codes = {item.code for item in validate_distribution_task(folder, tmp_path / "used.jsonl")}
+    assert "NUMBER_MISSING" in codes

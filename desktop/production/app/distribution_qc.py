@@ -25,8 +25,10 @@ def validate_distribution_task(folder: Path, successful_registry: Path) -> list[
         with Image.open(image) as decoded:
             if min(decoded.size) < 2048:
                 warnings.append(QcWarning("MIN_EDGE_LT_2048", "图片最短边小于 2048 像素"))
-        match = re.match(r"(\d+)", image.stem)
-        if folder_number and match and match.group(1) != folder_number:
+        match = re.match(r"^(\d+)(?:$|[_-])", image.stem)
+        if not match:
+            warnings.append(QcWarning("NUMBER_MISSING", "图片文件名缺少数字编号"))
+        elif folder_number and match.group(1) != folder_number:
             warnings.append(QcWarning("NUMBER_MISMATCH", "文件夹编号与图片编号不一致"))
         if hashlib.sha256(image.read_bytes()).hexdigest() in known:
             warnings.append(QcWarning("EXACT_REUSE", "图片已成功使用，禁止重复"))

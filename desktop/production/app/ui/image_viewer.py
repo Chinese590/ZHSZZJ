@@ -88,8 +88,8 @@ class ZoomableImageView(QtWidgets.QGraphicsView):
     def _preview_size(self) -> tuple[int, int]:
         viewport = self.viewport().size()
         return (
-            min(4096, max(1024, ceil(viewport.width() * self.devicePixelRatioF()))),
-            min(4096, max(1024, ceil(viewport.height() * self.devicePixelRatioF()))),
+            min(8192, max(2048, ceil(viewport.width() * self.devicePixelRatioF()))),
+            min(8192, max(2048, ceil(viewport.height() * self.devicePixelRatioF()))),
         )
 
     def _apply_loaded(self, loaded: LoadedImage, *, full_resolution: bool) -> bool:

@@ -203,6 +203,11 @@ class DistributionService:
         members.extend(prepared)
         self._write_json_atomic(self.members_path, members)
         for item in prepared:
+            # Keep the QC workspace ready for the member before the first upload.
+            for status in ("待返修", "待质检", "返修提交", "质检完成"):
+                status_root = self.project_root / "质检项目" / status
+                for folder_name in {item["member_id"], item["display_name"]}:
+                    (status_root / folder_name).mkdir(parents=True, exist_ok=True)
             self._append_audit("MEMBER_CREATE", member_id=item["member_id"], role=item["role"])
 
     def authenticate(self, member_id: str, password: str) -> bool:
@@ -254,7 +259,12 @@ class DistributionService:
             upload_dir = self.uploads_dir / task.task_id
             stored = upload_dir / f"result{result_image.suffix.lower()}"
             self._copy_file_atomic(result_image, stored)
-            queue = self.project_root / "质检项目" / "待质检" / str(member_id) / task.task_id
+            display_name = next(
+                (str(item.get("display_name")) for item in self._members()
+                 if item.get("member_id") == member_id),
+                str(member_id),
+            )
+            queue = self.project_root / "质检项目" / "待质检" / display_name / task.task_id
             queue.mkdir(parents=True, exist_ok=True)
             source = (self.project_root / task.source_path).resolve()
             shutil.copy2(source, queue / task.image_name)
