@@ -5,6 +5,8 @@ import json
 from pathlib import Path
 import subprocess
 import sys
+import re
+import shutil
 from threading import Thread
 
 import pytest
@@ -58,6 +60,19 @@ def test_ui_contains_separate_user_and_admin_workflows():
     assert "批量添加成员" in page
     assert "日终统计" in page
     assert "/api/tasks/upload" in page
+
+
+def test_embedded_ui_javascript_parses_in_node_when_available():
+    source = DistributionRequestHandler.do_GET.__code__.co_consts
+    page = " ".join(item for item in source if isinstance(item, str))
+    script = re.search(r"<script>(.*)</script>", page)
+    if not script:
+        pytest.fail("embedded UI script missing")
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is not installed")
+    result = subprocess.run([node, "--check", "-"], input=script.group(1), text=True, capture_output=True, check=False)
+    assert result.returncode == 0, result.stderr
 
 
 def test_admin_setup_bulk_member_and_daily_api(tmp_path):
