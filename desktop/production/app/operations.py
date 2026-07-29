@@ -73,6 +73,7 @@ class QualityOperations:
         target = self._target(group, "质检完成")
         self._check_move(source, target)
         self._move(source, target)
+        self._sync_distribution_state(target, "PASS")
         record = OperationRecord(
             timestamp=self._timestamp(),
             action="通过",
@@ -139,6 +140,8 @@ class QualityOperations:
                     note_path.unlink()
                 raise
 
+        self._sync_distribution_state(target, "REPAIR_REQUIRED")
+
         record = OperationRecord(
             timestamp=timestamp,
             action="不通过",
@@ -163,6 +166,25 @@ class QualityOperations:
         )
         self._append_log(record.to_dict())
         return record
+
+    @staticmethod
+    def _sync_distribution_state(folder: Path, verdict: str) -> None:
+        marker = folder / "distribution-task.json"
+        if not marker.exists():
+            return
+        try:
+            payload = json.loads(marker.read_text(encoding="utf-8"))
+            task_id = str(payload.get("task_id", ""))
+            project_root = folder
+            for parent in folder.parents:
+                if parent.name == "质检项目":
+                    project_root = parent.parent
+                    break
+            from .distribution_qc import sync_qc_result
+            sync_qc_result(project_root, task_id, {"task_id": task_id, "verdict": verdict})
+        except (OSError, ValueError, json.JSONDecodeError):
+            # Legacy QC folders remain usable; only DataGuard marker folders sync.
+            return
 
 
 

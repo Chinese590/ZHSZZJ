@@ -26,7 +26,7 @@ def validate_distribution_task(folder: Path, successful_registry: Path) -> list[
             if min(decoded.size) < 2048:
                 warnings.append(QcWarning("MIN_EDGE_LT_2048", "图片最短边小于 2048 像素"))
         match = re.match(r"^(\d+)(?:$|[_-])", image.stem)
-        if not match:
+        if folder_number and not match:
             warnings.append(QcWarning("NUMBER_MISSING", "图片文件名缺少数字编号"))
         elif folder_number and match.group(1) != folder_number:
             warnings.append(QcWarning("NUMBER_MISMATCH", "文件夹编号与图片编号不一致"))

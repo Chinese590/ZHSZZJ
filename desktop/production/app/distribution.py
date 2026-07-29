@@ -267,8 +267,13 @@ class DistributionService:
             queue = self.project_root / "质检项目" / "待质检" / display_name / task.task_id
             queue.mkdir(parents=True, exist_ok=True)
             source = (self.project_root / task.source_path).resolve()
-            shutil.copy2(source, queue / task.image_name)
-            shutil.copy2(stored, queue / stored.name)
+            # Emit the canonical QC-tool group contract: <id>.* + <id>_edit.*
+            # plus prompt files. This is the bridge between the browser client
+            # and the standalone QC executable.
+            shutil.copy2(source, queue / f"{task.task_id}{source.suffix.lower()}")
+            shutil.copy2(stored, queue / f"{task.task_id}_edit{stored.suffix.lower()}")
+            (queue / f"{task.task_id}_chn.txt").touch()
+            (queue / f"{task.task_id}_eng.txt").touch()
             (queue / "distribution-task.json").write_text(json.dumps({"task_id": task.task_id, "member_id": member_id, "source_sha256": task.sha256}, ensure_ascii=False), encoding="utf-8")
             updated = replace(task, state="UPLOADED_PENDING_QC")
             self._write_json_atomic(self._task_path(task.task_id), updated.to_dict())

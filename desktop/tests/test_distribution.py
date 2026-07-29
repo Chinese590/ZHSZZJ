@@ -100,6 +100,10 @@ def test_distribution_upload_and_recall_follow_owner_and_state(tmp_path):
     assert service.recall(owned.task_id, "admin", "下班召回").state == "AVAILABLE"
     replacement = service.distribute(["a"], 1)[0]
     assert service.upload(replacement.task_id, "a", source / "1.jpg").state == "UPLOADED_PENDING_QC"
+    qc_root = tmp_path / "质检项目" / "待质检" / "成员A" / replacement.task_id
+    assert (qc_root / f"{replacement.task_id}_edit.jpg").is_file()
+    assert (qc_root / f"{replacement.task_id}_chn.txt").is_file()
+    assert (qc_root / f"{replacement.task_id}_eng.txt").is_file()
     with pytest.raises(ValueError):
         service.recall(replacement.task_id, "admin", "不能召回已上传")
 
