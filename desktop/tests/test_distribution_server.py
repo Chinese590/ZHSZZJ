@@ -71,8 +71,13 @@ def test_embedded_ui_javascript_parses_in_node_when_available():
     node = shutil.which("node")
     if not node:
         pytest.skip("node is not installed")
-    result = subprocess.run([node, "--check", "-"], input=script.group(1), text=True, capture_output=True, check=False)
-    assert result.returncode == 0, result.stderr
+    result = subprocess.run(
+        [node, "--check", "-"],
+        input=script.group(1).encode("utf-8"),
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr.decode("utf-8", "replace")
 
 
 def test_admin_setup_bulk_member_and_daily_api(tmp_path):
