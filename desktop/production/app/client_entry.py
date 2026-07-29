@@ -9,8 +9,11 @@ import ctypes
 try:
     from .distribution_client import discover
 except ImportError:
-    sys.path.insert(0, str(Path(__file__).resolve().parent))
-    from distribution_client import discover
+    try:
+        from app.distribution_client import discover
+    except ImportError:
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from distribution_client import discover
 
 
 def main() -> None:
