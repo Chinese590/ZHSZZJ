@@ -2,6 +2,7 @@ from pathlib import Path
 from zipfile import ZipFile, ZIP_DEFLATED
 import shutil
 import tempfile
+import re
 
 archive = Path("dataguard/dataguard-source.zip")
 root = Path(tempfile.mkdtemp())
@@ -72,6 +73,14 @@ try:
             workbench = methods[methods.index("    def _harvest_workbench"):]
             backend_text = backend_text.replace(marker, workbench + marker, 1)
         backend.write_text(backend_text, encoding="utf-8")
+    # Make UI patch idempotent: remove prior generated controls before adding one copy.
+    generated_controls = [
+        '        ttk.Button(frame_cat, text="+ 创建类别", bootstyle="success-outline", command=self.on_create_category).pack(side="right", padx=2)\n',
+        '        ttk.Button(frame_batch, text="+ 创建批次", bootstyle="success-outline", command=self.on_create_batch).pack(side="right", padx=2)\n',
+        '        ttk.Button(frame_left, text="导入图片到当前批次", bootstyle="info-outline", command=self.on_import_images).pack(fill="x", pady=(6, 2))\n',
+    ]
+    for line in generated_controls:
+        text = text.replace(line, "")
     text = text.replace(
         '        ttk.Label(frame_cat, text="类别:", width=6).pack(side="left", anchor="n", pady=5)',
         '        ttk.Label(frame_cat, text="类别:", width=6).pack(side="left", anchor="n", pady=5)\n        ttk.Button(frame_cat, text="+ 创建类别", bootstyle="success-outline", command=self.on_create_category).pack(side="right", padx=2)', 1)
