@@ -11,6 +11,79 @@ try:
 
     app = root / "alchemy" / "app.py"
     text = app.read_text(encoding="utf-8")
+    backend = root / "alchemy" / "backend.py"
+    backend_text = backend.read_text(encoding="utf-8")
+    marker = "    def get_raw_categories(self):"
+    methods = '''    def create_raw_category(self, name):
+        name = str(name or "").strip()
+        if not name or name in {".", ".."} or any(ch in name for ch in '<>:"/\\\\|?*'):
+            return False, "类别名称无效"
+        path = os.path.join(self.dirs["RAW"], name)
+        if os.path.exists(path): return False, f"类别 [{name}] 已存在"
+        try: os.makedirs(path, exist_ok=False); return True, f"类别 [{name}] 创建成功"
+        except OSError as exc: return False, f"创建类别失败: {exc}"
+
+    def create_raw_batch(self, category, name):
+        category, name = str(category or "").strip(), str(name or "").strip()
+        if not category or not name or name in {".", ".."} or any(ch in name for ch in '<>:"/\\\\|?*'):
+            return False, "批次名称无效"
+        parent = os.path.join(self.dirs["RAW"], category)
+        if not os.path.isdir(parent): return False, "请先创建类别"
+        path = os.path.join(parent, name)
+        if os.path.exists(path): return False, f"批次 [{name}] 已存在"
+        try: os.makedirs(path, exist_ok=False); return True, f"批次 [{name}] 创建成功"
+        except OSError as exc: return False, f"创建批次失败: {exc}"
+
+    def import_raw_images(self, category, batch, paths):
+        target = os.path.join(self.dirs["RAW"], str(category or ""), str(batch or ""))
+        if not os.path.isdir(target): return False, "请先创建类别和批次"
+        copied = 0
+        for source in paths or ():
+            if os.path.isfile(source) and os.path.splitext(source)[1].lower() in IMAGE_EXTENSIONS:
+                destination = os.path.join(target, os.path.basename(source))
+                if not os.path.exists(destination): shutil.copy2(source, destination); copied += 1
+        return True, f"已导入 {copied} 张图片"
+
+'''
+    if marker in backend_text and "def create_raw_category" not in backend_text:
+        backend.write_text(backend_text.replace(marker, methods + marker, 1), encoding="utf-8")
+    text = text.replace(
+        '        ttk.Label(frame_cat, text="类别:", width=6).pack(side="left", anchor="n", pady=5)',
+        '        ttk.Label(frame_cat, text="类别:", width=6).pack(side="left", anchor="n", pady=5)\n        ttk.Button(frame_cat, text="+ 创建类别", bootstyle="success-outline", command=self.on_create_category).pack(side="right", padx=2)', 1)
+    text = text.replace(
+        '        ttk.Label(frame_batch, text="批次:", width=6).pack(side="left")',
+        '        ttk.Label(frame_batch, text="批次:", width=6).pack(side="left")\n        ttk.Button(frame_batch, text="+ 创建批次", bootstyle="success-outline", command=self.on_create_batch).pack(side="right", padx=2)', 1)
+    text = text.replace(
+        '        frame_group = ttk.Frame(frame_left)\n        frame_group.pack(fill="x", pady=(10, 2))',
+        '        ttk.Button(frame_left, text="导入图片到当前批次", bootstyle="info-outline", command=self.on_import_images).pack(fill="x", pady=(6, 2))\n        frame_group = ttk.Frame(frame_left)\n        frame_group.pack(fill="x", pady=(10, 2))', 1)
+    handlers = '''    def on_create_category(self):
+        name = simpledialog.askstring("创建类别", "类别名称：", parent=self.root)
+        if name:
+            ok, msg = self.backend.create_raw_category(name)
+            (messagebox.showinfo if ok else messagebox.showerror)("类别", msg, parent=self.root)
+            if ok: self.refresh_categories_and_batches()
+
+    def on_create_batch(self):
+        category = self.var_category.get()
+        if not category: return messagebox.showwarning("批次", "请先选择类别", parent=self.root)
+        name = simpledialog.askstring("创建批次", f"类别 [{category}] 的批次名称：", parent=self.root)
+        if name:
+            ok, msg = self.backend.create_raw_batch(category, name)
+            (messagebox.showinfo if ok else messagebox.showerror)("批次", msg, parent=self.root)
+            if ok: self.refresh_categories_and_batches()
+
+    def on_import_images(self):
+        category, batch = self.var_category.get(), self.combo_batches.get()
+        if not category or not batch: return messagebox.showwarning("导入图片", "请先选择类别和批次", parent=self.root)
+        paths = filedialog.askopenfilenames(title="选择要导入的图片", filetypes=[("图片", "*.jpg *.jpeg *.png *.bmp *.webp *.tif *.tiff"), ("全部文件", "*.*")])
+        if paths:
+            ok, msg = self.backend.import_raw_images(category, batch, paths)
+            (messagebox.showinfo if ok else messagebox.showerror)("导入图片", msg, parent=self.root)
+            if ok: self.on_category_btn_click()
+
+'''
+    if "def on_create_category" not in text:
+        text = text.replace("    def on_create_user_click(self):", handlers + "    def on_create_user_click(self):", 1)
     text = text.replace(
         '        if success:\n            self.append_log(msg)\n            messagebox.showinfo("完成", msg)',
         '        if success:\n            self.refresh_categories_and_batches()\n            self.refresh_users()\n            self.refresh_harvest_status()\n            self.refresh_dates()\n            self.refresh_qa_targets()\n            self.append_log(msg)\n            messagebox.showinfo("完成", msg)',
