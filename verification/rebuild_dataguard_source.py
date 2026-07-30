@@ -81,6 +81,18 @@ try:
     ]
     for line in generated_controls:
         text = text.replace(line, "")
+    stats_marker = '            distributed_today = dist_data.get(user, 0)'
+    stats_insert = '''            workbench_new = os.path.join(self.dirs["QC"], "质检工作台", "待质检", user)
+            workbench_rework = os.path.join(self.dirs["QC"], "质检工作台", "返修提交", user)
+            try:
+                normal += sum(1 for _ in self._iter_classified_tasks(workbench_new))
+                rework_count += sum(1 for _ in self._iter_classified_tasks(workbench_rework))
+            except OSError:
+                pass
+'''
+    if stats_marker in backend_text and 'workbench_new = os.path.join(self.dirs["QC"]' not in backend_text:
+        backend_text = backend_text.replace(stats_marker, stats_insert + stats_marker, 1)
+        backend.write_text(backend_text, encoding="utf-8")
     text = text.replace(
         '        ttk.Label(frame_cat, text="类别:", width=6).pack(side="left", anchor="n", pady=5)',
         '        ttk.Label(frame_cat, text="类别:", width=6).pack(side="left", anchor="n", pady=5)\n        ttk.Button(frame_cat, text="+ 创建类别", bootstyle="success-outline", command=self.on_create_category).pack(side="right", padx=2)', 1)
