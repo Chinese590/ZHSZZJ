@@ -44,9 +44,34 @@ try:
                 if not os.path.exists(destination): shutil.copy2(source, destination); copied += 1
         return True, f"已导入 {copied} 张图片"
 
+    def _harvest_workbench(self, user, status_name, target_root, today_str, separate_psd, msg_queue, cancel_flag):
+        """回收统一质检工作台中的已提交任务，避免用户端提交后管理端扫描不到。"""
+        source_root = os.path.join(self.dirs["QC"], "质检工作台", status_name, user)
+        if not os.path.isdir(source_root):
+            return 0, 0
+        moved = skipped = 0
+        for recovery_path, folder_name, src in list(self._iter_classified_tasks(source_root)):
+            if cancel_flag and cancel_flag():
+                break
+            dst = os.path.join(target_root, *recovery_path, user, folder_name)
+            ok, msg = self._safe_move(src, dst, msg_queue=msg_queue)
+            if ok:
+                moved += 1
+                if separate_psd:
+                    self._separate_psd_files(dst, user, folder_name, msg_queue=msg_queue)
+            else:
+                skipped += 1
+                self.log(f"质检工作台回收失败 {folder_name}: {msg}")
+        return moved, skipped
+
 '''
-    if marker in backend_text and "def create_raw_category" not in backend_text:
-        backend.write_text(backend_text.replace(marker, methods + marker, 1), encoding="utf-8")
+    if marker in backend_text:
+        if "def create_raw_category" not in backend_text:
+            backend_text = backend_text.replace(marker, methods + marker, 1)
+        elif "def _harvest_workbench" not in backend_text:
+            workbench = methods[methods.index("    def _harvest_workbench"):]
+            backend_text = backend_text.replace(marker, workbench + marker, 1)
+        backend.write_text(backend_text, encoding="utf-8")
     text = text.replace(
         '        ttk.Label(frame_cat, text="类别:", width=6).pack(side="left", anchor="n", pady=5)',
         '        ttk.Label(frame_cat, text="类别:", width=6).pack(side="left", anchor="n", pady=5)\n        ttk.Button(frame_cat, text="+ 创建类别", bootstyle="success-outline", command=self.on_create_category).pack(side="right", padx=2)', 1)
@@ -128,6 +153,14 @@ try:
             return messagebox.showwarning("还差一步", "请先准备：" + "、".join(missing) + "。类别/批次在左侧，图片在中间，人员在右侧。")'''
     if old in text:
         text = text.replace(old, new, 1)
+    harvest_marker = '            n, a, s = self._harvest_done(user, qc_new_root, qc_abandoned_dir, today_str, separate_psd, msg_queue, cancel_flag)'
+    harvest_insert = '''            wb_new, wb_new_skipped = self._harvest_workbench(user, "待质检", qc_new_root, today_str, separate_psd, msg_queue, cancel_flag)
+            wb_rework, wb_rework_skipped = self._harvest_workbench(user, "返修提交", qc_rework_root, today_str, separate_psd, msg_queue, cancel_flag)
+            cnt_new += wb_new; cnt_rework += wb_rework; cnt_skipped += wb_new_skipped + wb_rework_skipped
+'''
+    if harvest_marker in backend_text and "_harvest_workbench(user" not in backend_text:
+        backend_text = backend_text.replace(harvest_marker, harvest_insert + harvest_marker, 1)
+        backend.write_text(backend_text, encoding="utf-8")
     app.write_text(text, encoding="utf-8")
 
     user = root / "DataGuardUser.py"
@@ -143,6 +176,9 @@ try:
         1,
     )
     user.write_text(text, encoding="utf-8")
+
+    regression = root / "tests" / "test_workbench_harvest.py"
+    regression.write_text('''import datetime\nimport os\nimport tempfile\nimport unittest\n\nfrom alchemy.backend import AlchemyBackend\nfrom alchemy.constants import DATE_FMT, QC_NEW\n\n\nclass WorkbenchHarvestTests(unittest.TestCase):\n    def test_user_submission_workbench_is_recovered(self):\n        with tempfile.TemporaryDirectory() as root:\n            backend = AlchemyBackend()\n            backend.set_root(root)\n            backend.init_directories()\n            backend.create_user_folders("U")\n            source = os.path.join(backend.dirs["QC"], "质检工作台", "待质检", "U", "12345678")\n            os.makedirs(source)\n            result = backend.harvest(target_user="U", collect_unfinished=False)\n            today = datetime.datetime.now().strftime(DATE_FMT)\n            target = os.path.join(backend.dirs["QC"], QC_NEW, today, "U", "12345678")\n            self.assertEqual(result[0], 1)\n            self.assertTrue(os.path.isdir(target))\n            self.assertFalse(os.path.exists(source))\n            backend.close()\n\n\nif __name__ == "__main__":\n    unittest.main()\n''', encoding="utf-8")
 
     constants = root / "alchemy" / "constants.py"
     ctext = constants.read_text(encoding="utf-8").replace("v1.9.20", "v1.9.22").replace("v1.9.21", "v1.9.22")
