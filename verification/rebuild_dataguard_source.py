@@ -53,12 +53,17 @@ try:
         if not user_list: missing.append("目标人员")
         if missing:
             return messagebox.showwarning("还差一步", "请先准备：" + "、".join(missing) + "。类别/批次在左侧，图片在中间，人员在右侧。")'''
-    if old not in text:
-        raise SystemExit("distribution selection pattern missing")
-    app.write_text(text.replace(old, new, 1), encoding="utf-8")
+    if old in text:
+        text = text.replace(old, new, 1)
+    app.write_text(text, encoding="utf-8")
 
     user = root / "DataGuardUser.py"
     text = user.read_text(encoding="utf-8")
+    text = text.replace(
+        '            destination.parent.mkdir(parents=True, exist_ok=True)\n            shutil.move(selected, destination)\n            qc_status = "待质检" if destination_name == USER_DONE else "返修提交"\n            qc_root = Path(self.project_var.get()) / "04_Quality_Check" / "质检工作台" / qc_status / self.user_var.get() / relative\n            if qc_root.exists():\n                raise FileExistsError(f"质检目录中已存在：{qc_root}")\n            qc_root.parent.mkdir(parents=True, exist_ok=True)\n            shutil.copytree(destination, qc_root)',
+        '            qc_status = "待质检" if destination_name == USER_DONE else "返修提交"\n            qc_root = Path(self.project_var.get()) / "04_Quality_Check" / "质检工作台" / qc_status / self.user_var.get() / relative\n            if qc_root.exists():\n                raise FileExistsError(f"质检目录中已存在：{qc_root}")\n            qc_root.parent.mkdir(parents=True, exist_ok=True)\n            shutil.move(selected, qc_root)',
+        1,
+    )
     text = text.replace(
         '            destination.parent.mkdir(parents=True, exist_ok=True)\n            shutil.move(selected, destination)',
         '            destination.parent.mkdir(parents=True, exist_ok=True)\n            shutil.move(selected, destination)\n            qc_status = "待质检" if destination_name == USER_DONE else "返修提交"\n            qc_root = Path(self.project_var.get()) / "04_Quality_Check" / "质检工作台" / qc_status / self.user_var.get() / relative\n            if qc_root.exists():\n                raise FileExistsError(f"质检目录中已存在：{qc_root}")\n            qc_root.parent.mkdir(parents=True, exist_ok=True)\n            shutil.copytree(destination, qc_root)',
@@ -67,11 +72,11 @@ try:
     user.write_text(text, encoding="utf-8")
 
     constants = root / "alchemy" / "constants.py"
-    ctext = constants.read_text(encoding="utf-8").replace("v1.9.20", "v1.9.21")
+    ctext = constants.read_text(encoding="utf-8").replace("v1.9.20", "v1.9.22").replace("v1.9.21", "v1.9.22")
     constants.write_text(ctext, encoding="utf-8")
     for p in root.rglob("*.txt"):
         try:
-            p.write_text(p.read_text(encoding="utf-8", errors="ignore").replace("v1.9.20", "v1.9.21"), encoding="utf-8")
+            p.write_text(p.read_text(encoding="utf-8", errors="ignore").replace("v1.9.20", "v1.9.22").replace("v1.9.21", "v1.9.22"), encoding="utf-8")
         except OSError:
             pass
 

@@ -325,14 +325,17 @@ class MainWindow(QtWidgets.QMainWindow):
         zoom_label = QtWidgets.QLabel("100%")
         fit_button = QtWidgets.QPushButton("适应")
         actual_button = QtWidgets.QPushButton("1:1")
+        native_button = QtWidgets.QPushButton("系统查看")
         fit_button.setFixedWidth(58)
         actual_button.setFixedWidth(52)
+        native_button.setFixedWidth(76)
         header.addWidget(label)
         header.addWidget(pixel_label)
         header.addStretch(1)
         header.addWidget(zoom_label)
         header.addWidget(fit_button)
         header.addWidget(actual_button)
+        header.addWidget(native_button)
         layout.addLayout(header)
         viewer = ZoomableImageView()
         viewer.zoom_changed.connect(
@@ -347,8 +350,24 @@ class MainWindow(QtWidgets.QMainWindow):
         )
         fit_button.clicked.connect(viewer.fit_to_view)
         actual_button.clicked.connect(viewer.actual_size)
+        native_button.clicked.connect(lambda _checked=False, target=viewer: self._open_native_image(target))
         layout.addWidget(viewer, 1)
         return viewer, card, pixel_label
+
+    def _open_native_image(self, viewer: ZoomableImageView) -> None:
+        path = getattr(viewer, "_source_path", None)
+        if path is None or not path.is_file():
+            self.statusBar().showMessage("当前没有可查看的图片", 4000)
+            return
+        try:
+            if sys.platform.startswith("win"):
+                os.startfile(str(path))  # type: ignore[attr-defined]
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", str(path)])
+            else:
+                subprocess.Popen(["xdg-open", str(path)])
+        except OSError as exc:
+            self._show_error("系统图片查看器打开失败", exc)
 
     def _summary_label(self, text: str) -> QtWidgets.QLabel:
         label = QtWidgets.QLabel(text)
